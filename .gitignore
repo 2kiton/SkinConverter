@@ -141,3 +141,91 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# ==========================================
+# 1. Operating System Files
+# ==========================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.lnk
+*.cab
+
+# Linux
+.fuse_hidden*
+.directory
+.trash/
+*.bak
+
+# ==========================================
+# 2. Environments and Secrets (CRITICAL)
+# ==========================================
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+*.pem
+*.key
+*.secret
+credentials.json
+# Allow sharing example structure safely
+!.env.example
+
+# ==========================================
+# 3. Common Editors and IDEs
+# ==========================================
+# VS Code
+.vscode/
+!.vscode/extensions.json
+*.code-workspace
+
+# JetBrains (IntelliJ, WebStorm, PyCharm, etc.)
+.idea/
+*.iws
+
+# Vim / Emacs
+*~
+*.swp
+*.swo
+.netrwhist
+
+# ==========================================
+# 4. Universal Build & Packages Artifacts
+# ==========================================
+# Common dependency directories
+node_modules/
+jspm_packages/
+bower_components/
+vendor/
+
+# Common build outputs
+build/
+dist/
+out/
+target/
+bin/
+obj/
+
+# Logs and databases
+*.log
+*.sqlite
+*.db
+
+# Temporary / Cache files
+.cache/
+.sass-cache/
+.eslintcache
+.npm/
+
+# Temporary files
+*.tmp
