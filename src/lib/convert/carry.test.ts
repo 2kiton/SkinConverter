@@ -27,7 +27,6 @@ const EXTRAS = [
   "SFX/hitsound.wav",
   "SFX/combobreak.wav",
   "Backgrounds/bg.jpg",
-  "Grades/grade-small-s.png",
   "cursor.png",
   "steam_workshop_preview.png",
 ];
@@ -35,6 +34,7 @@ const EXTRAS = [
 /** These DO have mappings, so they are converted rather than carried. */
 const FONTS = ["Numbers/combo-0.png", "Numbers/score-0.png"];
 const HEALTH = ["Health/health-background.png", "Health/health-foreground.png"];
+const GRADES = ["Grades/grade-small-s.png", "Grades/grade-small-x.png"];
 
 describe("non-playfield files", () => {
   it("carries every unmapped file through instead of dropping it", async () => {
@@ -59,6 +59,16 @@ describe("non-playfield files", () => {
     // osu! substitutes its own marker for a missing file, so it is blanked.
     expect(out.has("scorebar-marker.png")).toBe(true);
     expect(report.entries.some((e) => e.elementId === "healthExtras")).toBe(true);
+  });
+
+  it("converts rank sprites onto osu!'s leaderboard grades", async () => {
+    const src = await build("t.qs", [...GRADES, ...EXTRAS], QUAVER_INI);
+    const { pkg } = await convertSkin(src);
+
+    const out = new Set(pkg.entries.map((e) => e.path.toLowerCase()));
+    expect(out.has("ranking-s-small.png")).toBe(true);
+    expect(out.has("ranking-x-small.png")).toBe(true);
+    expect(out.has("grades/grade-small-s.png")).toBe(false);
   });
 
   it("converts number fonts rather than carrying them", async () => {
@@ -96,7 +106,7 @@ describe("non-playfield files", () => {
     expect(labelFor("SFX/hitsound.wav")).toBe("Sound effect");
     expect(labelFor("Backgrounds/bg.jpg")).toBe("Background");
     expect(labelFor("cursor.png")).toBe("Cursor");
-    expect(labelFor("Grades/grade-small-s.png")).toBe("Grade");
+    expect(labelFor("steam_workshop_preview.png")).toBe("Unmapped file");
   });
 
   it("does not carry a file it already converted", async () => {

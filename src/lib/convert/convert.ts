@@ -41,6 +41,12 @@ import {
 } from "./geometry";
 import { FileIndex, fallbackIndexFor, NO_FALLBACKS, type QuaverFallbacks } from "./files";
 import {
+  GRADES,
+  QUAVER_ONLY_GRADES,
+  osuGradePath,
+  quaverGradePath,
+} from "./grades";
+import {
   HEALTH_PIECES,
   SUPPRESSED_OSU_PIECES,
   VERTICAL_TO_HORIZONTAL_DEGREES,
@@ -152,6 +158,50 @@ async function quaverToOsuSkin(source: SkinPackage, options: ConvertOptions): Pr
     for (const [key, value] of fontKeys) ini.pair(key, value);
   }
 
+  // Rank sprites, global rather than per keymode. Quaver's grade art is
+  // small-format, matching osu!'s leaderboard variants; osu!'s results-screen
+  // grades are far larger and are deliberately left to osu!'s own skin.
+  for (const grade of GRADES) {
+    const src = index.get(quaverGradePath(grade.quaver));
+    if (!src) continue;
+
+    // Grades sit in menus and the leaderboard, which stay in osu!'s 480-space
+    // rather than the playfield's 768-space.
+    const gradeHd = await proc.scaleBy(src.bytes, QUAVER_TO_OSU * 2);
+    const gradeSd = await proc.scaleBy(src.bytes, QUAVER_TO_OSU);
+
+    for (const name of grade.osu) {
+      const outPath = osuGradePath(name);
+      entries.push({ path: outPath, originalPath: src.path, bytes: gradeSd });
+      entries.push({
+        path: outPath.replace(/\.png$/i, "@2x.png"),
+        originalPath: src.path,
+        bytes: gradeHd,
+      });
+    }
+    consumed.add(src.path.toLowerCase());
+
+    report.push({
+      elementId: `grade-${grade.quaver}`,
+      label: grade.label,
+      group: "judgements",
+      cost: "identity",
+      status: "processed",
+      from: src.path,
+      to: grade.osu.map(osuGradePath).join(", "),
+      ...(grade.osu.length > 1
+        ? { detail: "Fills both osu! variants; the silver one is earned with Hidden or Flashlight, which Quaver has no equivalent for." }
+        : {}),
+    });
+  }
+
+  for (const id of QUAVER_ONLY_GRADES) {
+    if (!index.get(quaverGradePath(id))) continue;
+    warnings.push(
+      `Quaver's ${id.toUpperCase()} grade was not carried across — osu! has no failing rank and shows D instead, which is already taken by Quaver's own D.`,
+    );
+  }
+
   // Health bar, also global rather than per keymode.
   let healthFound = false;
   for (const piece of HEALTH_PIECES) {
@@ -160,17 +210,19 @@ async function quaverToOsuSkin(source: SkinPackage, options: ConvertOptions): Pr
     healthFound = true;
 
     let bytes = src.bytes;
-    let detail = "Scaled from Quaver's 768-high space into osu!'s 480-high one.";
+    const notes: string[] = [];
 
     // Quaver's bar may be vertical; osu!'s scorebar is horizontal only.
     const size = await proc.measure(bytes);
     if (size && isVertical(size.width, size.height)) {
       bytes = await proc.rotate(bytes, VERTICAL_TO_HORIZONTAL_DEGREES);
-      detail = "Rotated a vertical Quaver bar to osu!'s horizontal scorebar, then rescaled.";
+      notes.push("rotated from vertical to osu!'s horizontal scorebar");
     }
 
     const hd = await proc.scaleBy(bytes, QUAVER_TO_OSU * 2);
     bytes = await proc.scaleBy(bytes, QUAVER_TO_OSU);
+    notes.push("scaled into osu!'s 480-space HUD");
+    const detail = notes.join("; ");
 
     entries.push({ path: piece.osu, originalPath: src.path, bytes });
     entries.push({ path: piece.osu.replace(/\.png$/i, "@2x.png"), originalPath: src.path, bytes: hd });
@@ -540,6 +592,36 @@ async function osuToQuaverSkin(
         to: outPath,
       });
     }
+  }
+
+  for (const grade of GRADES) {
+    // The first osu! name is the primary one; SH/XH are silver variants of it.
+    const primary = grade.osu[0]!;
+    const found = index.findOsu(osuGradePath(primary));
+    if (!found) continue;
+
+    const outPath = quaverGradePath(grade.quaver);
+    if (entries.some((e) => e.path.toLowerCase() === outPath.toLowerCase())) continue;
+
+    const bytes = await proc.scaleBy(found.entry.bytes, OSU_TO_QUAVER);
+    entries.push({ path: outPath, originalPath: found.entry.path, bytes });
+    consumed.add(found.entry.path.toLowerCase());
+    report.push({
+      elementId: `grade-${grade.quaver}`,
+      label: grade.label,
+      group: "judgements",
+      cost: "identity",
+      status: "processed",
+      from: found.entry.path,
+      to: outPath,
+      detail: "Scaled from osu!'s 480-space into Quaver's 768-high one.",
+    });
+  }
+
+  if (GRADES.some((g) => index.findOsu(osuGradePath(g.osu[0]!)))) {
+    warnings.push(
+      "Quaver's F grade has no osu! source — osu! has no failing rank — so it will fall back to Quaver's default.",
+    );
   }
 
   for (const piece of HEALTH_PIECES) {
