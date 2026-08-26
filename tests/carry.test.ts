@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import JSZip from "jszip";
-import { readSkin } from "../skin/read";
-import { convertSkin } from "./convert";
-import type { SkinPackage } from "../skin/types";
+import { readSkin } from "../src/lib/skin/read";
+import { convertSkin } from "../src/lib/convert/convert";
+import type { SkinPackage } from "../src/lib/skin/types";
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
 
@@ -16,7 +16,10 @@ async function build(name: string, paths: string[], ini: string): Promise<SkinPa
   const zip = new JSZip();
   for (const path of paths) zip.file(path, PNG);
   zip.file("skin.ini", ini);
-  const bytes = await zip.generateAsync({ type: "uint8array" });
+  // "arraybuffer" rather than "uint8array": a Uint8Array is typed over
+  // ArrayBufferLike, which includes SharedArrayBuffer and so is not a valid
+  // BlobPart from TypeScript 5.7 onward. An ArrayBuffer always is.
+  const bytes = await zip.generateAsync({ type: "arraybuffer" });
   return readSkin(new File([bytes], name));
 }
 

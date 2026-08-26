@@ -233,4 +233,4 @@ obj/
 /skins-test/
 
 # Vitest browser-mode failure screenshots
-src/**/__screenshots__/
+tests/**/__screenshots__/

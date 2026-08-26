@@ -253,33 +253,6 @@ function judgement(quaverName: string, osuName: string): ElementMapping[] {
   ];
 }
 
-/** Elements that exist in both formats, in the direction given. */
-export function mappableElements(): ElementMapping[] {
-  return ELEMENTS.filter((e) => e.quaver !== null && e.osu !== null);
-}
-
-export function elementById(id: string): ElementMapping | undefined {
-  return ELEMENTS.find((e) => e.id === id);
-}
-
-export interface PathContext {
-  keymodeFolder: string;
-  lane?: number;
-  token?: string;
-}
-
-export function resolveQuaverPath(mapping: ElementMapping, ctx: PathContext): string | null {
-  if (mapping.quaver === null) return null;
-  return mapping.quaver
-    .replace("{keymode}", ctx.keymodeFolder)
-    .replace("{lane}", String(ctx.lane ?? 1));
-}
-
-export function resolveOsuPath(mapping: ElementMapping, ctx: PathContext): string | null {
-  if (mapping.osu === null) return null;
-  return mapping.osu.replace("{token}", ctx.token ?? "1");
-}
-
 /** Expand an osu! skin.ini image key like `NoteImage{n}H` for a column. */
 export function resolveOsuIniKey(mapping: ElementMapping, columnIndex: number): string | null {
   if (!mapping.osuIniKey) return null;

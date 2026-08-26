@@ -5,7 +5,7 @@ import {
   parseSpecialStyle,
   specialColumnIndex,
   SpecialStyle,
-} from "./lanes";
+} from "../src/lib/convert/lanes";
 
 /**
  * These expectations come from osu!'s own `LegacyManiaColumnElement`, not from

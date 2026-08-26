@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { parseIni, serializeIni } from "../ini/document";
-import { allSections, get, readSection } from "../ini/access";
-import { convertSkin } from "./convert";
-import type { SkinEntry, SkinFormat, SkinPackage } from "../skin/types";
+import { parseIni, serializeIni } from "../src/lib/ini/document";
+import { allSections, get, readSection } from "../src/lib/ini/access";
+import { convertSkin } from "../src/lib/convert/convert";
+import type { SkinEntry, SkinFormat, SkinPackage } from "../src/lib/skin/types";
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
 

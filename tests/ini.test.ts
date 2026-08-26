@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { parseIni, serializeIni } from "./document";
-import { allSections, sections, get, set, readSection, sectionNames } from "./access";
+import { parseIni, serializeIni } from "../src/lib/ini/document";
+import { allSections, sections, get, set, readSection, sectionNames } from "../src/lib/ini/access";
 
 /** Round-tripping is the whole point, so assert it on every sample. */
 function stable(source: string) {

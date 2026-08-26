@@ -16,7 +16,7 @@ import {
   quaverToOsu,
   stageWidth,
   tidy,
-} from "./geometry";
+} from "../src/lib/convert/geometry";
 
 describe("the scale factor", () => {
   it("matches osu!'s own STABLE_MAGIC_SCALE_FACTOR", () => {

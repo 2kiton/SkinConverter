@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { parseIni } from "../ini/document";
-import { allSections, readSection } from "../ini/access";
-import { convertSkin } from "./convert";
-import type { ImageProcessor, LaneSlot, PackedSheet } from "./images";
-import type { SkinEntry, SkinFormat, SkinPackage } from "../skin/types";
+import { parseIni } from "../src/lib/ini/document";
+import { allSections, readSection } from "../src/lib/ini/access";
+import { convertSkin } from "../src/lib/convert/convert";
+import type { ImageProcessor, LaneSlot, PackedSheet } from "../src/lib/convert/images";
+import type { SkinEntry, SkinFormat, SkinPackage } from "../src/lib/skin/types";
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
 

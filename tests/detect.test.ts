@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { detectFormat } from "./detect";
+import { detectFormat } from "../src/lib/skin/detect";
 
 describe("format detection", () => {
   it("recognises a Quaver skin by its keymode folders", () => {

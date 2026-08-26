@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { parseIni } from "../ini/document";
-import { allSections, readSection } from "../ini/access";
-import { convertSkin } from "./convert";
-import type { SkinEntry, SkinFormat, SkinPackage } from "../skin/types";
+import { parseIni } from "../src/lib/ini/document";
+import { allSections, readSection } from "../src/lib/ini/access";
+import { convertSkin } from "../src/lib/convert/convert";
+import type { SkinEntry, SkinFormat, SkinPackage } from "../src/lib/skin/types";
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
 
@@ -51,7 +51,7 @@ describe("stage appearance", () => {
       pkg("quaver", QUAVER_INI, [...NOTES, "4k/Stage/stage-bgmask.png"]),
       {
         processor: {
-          ...(await import("./images")).passthroughProcessor,
+          ...(await import("../src/lib/convert/images")).passthroughProcessor,
           async sampleLaneColours(_b, lanes) {
             return lanes.map(() => ({ r: 20, g: 30, b: 40, a: 255 }));
           },
@@ -73,7 +73,7 @@ describe("hit position", () => {
   const RECEPTORS = [1, 2, 3, 4].map((n) => `4k/Receptors/receptor-up-${n}.png`);
 
   async function withReceptor(width: number, height: number) {
-    const { passthroughProcessor } = await import("./images");
+    const { passthroughProcessor } = await import("../src/lib/convert/images");
     return convertSkin(pkg("quaver", QUAVER_INI, [...NOTES, ...RECEPTORS]), {
       processor: {
         ...passthroughProcessor,
@@ -98,7 +98,7 @@ describe("hit position", () => {
   });
 
   it("still honours HitPosOffsetY on top of that", async () => {
-    const { passthroughProcessor } = await import("./images");
+    const { passthroughProcessor } = await import("../src/lib/convert/images");
     const offsetIni = ["[General]", "Name = T", "", "[4K]", "ColumnSize = 90", "HitPosOffsetY = 16", ""].join(
       "\r\n",
     );
@@ -162,7 +162,7 @@ describe("number fonts", () => {
 
   it("shrinks glyphs into osu!'s 480-space HUD", async () => {
     const log: number[] = [];
-    const { passthroughProcessor } = await import("./images");
+    const { passthroughProcessor } = await import("../src/lib/convert/images");
     await convertSkin(pkg("quaver", QUAVER_INI, [...NOTES, ...QUAVER_FONTS]), {
       processor: {
         ...passthroughProcessor,

@@ -6,8 +6,8 @@ export default defineConfig({
   plugins: [react()],
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    include: ["tests/**/*.test.ts"],
     // Pixel tests need a real browser; see vitest.browser.config.ts.
-    exclude: ["src/**/*.browser.test.ts", "node_modules/**"],
+    exclude: ["tests/**/*.browser.test.ts", "node_modules/**"],
   },
 });

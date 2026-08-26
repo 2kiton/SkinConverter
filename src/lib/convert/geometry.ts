@@ -34,8 +34,6 @@ export const OSU_SCREEN_WIDTH = 640;
 
 /** Quaver's own default column size, in its 1366x768 space. */
 export const QUAVER_DEFAULT_COLUMN_SIZE = 90;
-/** The Quaver authoring box width, in its own units. */
-export const QUAVER_SCREEN_WIDTH = 1366;
 
 export function osuToQuaver(value: number): number {
   return value * OSU_TO_QUAVER;
@@ -165,23 +163,6 @@ export enum NoteBodyStyle {
 
 /** The style that matches Quaver's stretched hold body. */
 export const QUAVER_EQUIVALENT_BODY_STYLE = NoteBodyStyle.Stretch;
-
-export function describeBodyStyle(value: number | null): string {
-  switch (value) {
-    case NoteBodyStyle.Stretch:
-      return "stretch";
-    case NoteBodyStyle.RepeatTop:
-      return "repeat from top";
-    case NoteBodyStyle.RepeatBottom:
-      return "repeat from bottom";
-    case NoteBodyStyle.RepeatTopAndBottom:
-      return "repeat from both ends";
-    case 1:
-      return "repeat (not honoured by osu!)";
-    default:
-      return "unset";
-  }
-}
 
 /** RGB(A) colour, as both games write it: `r,g,b` or `r,g,b,a`. */
 export interface Rgba {

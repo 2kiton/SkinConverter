@@ -16,7 +16,6 @@ import { ELEMENTS, type ElementMapping } from "../convert/elements";
 import { columnTokens, parseSpecialStyle } from "../convert/lanes";
 import { FileIndex } from "../convert/files";
 import {
-  OSU_DEFAULT_COLUMN_START,
   OSU_DEFAULT_COLUMN_WIDTH,
   OSU_DEFAULT_HIT_POSITION,
   OSU_SCREEN_HEIGHT,
@@ -25,7 +24,6 @@ import {
   parseNumber,
   parseNumberList,
   parseRgba,
-  quaverToOsu,
   stageWidth,
   type Rgba,
 } from "../convert/geometry";
@@ -237,10 +235,3 @@ function quaverPath(mapping: ElementMapping, keymode: string, lane: number | und
     .replace("{keymode}", keymode.toLowerCase())
     .replace("{lane}", String(lane ?? 1));
 }
-
-/** osu! `ColumnStart` in 768-space, for callers that need absolute placement. */
-export function osuColumnStart(config: Record<string, string>): number {
-  return osuToQuaver(parseNumber(config["ColumnStart"]) ?? OSU_DEFAULT_COLUMN_START);
-}
-
-export { quaverToOsu };

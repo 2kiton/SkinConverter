@@ -68,22 +68,3 @@ export function columnTokens(keys: number, style: SpecialStyle = SpecialStyle.No
   const special = specialColumnIndex(keys, style);
   return Array.from({ length: keys }, (_, i) => fallbackColumnToken(i, keys, special));
 }
-
-/**
- * Quaver's scratch lane. In its keymode folders the scratch lane is an extra
- * texture index past the playable lanes — lane 8 in 7K, per the wiki's
- * "there's an extra texture for the scratch lane" note.
- */
-export function quaverScratchLane(keys: number): number {
-  return keys + 1;
-}
-
-/** Quaver lane number (1-based) for an osu! column index (0-based). */
-export function osuColumnToQuaverLane(columnIndex: number): number {
-  return columnIndex + 1;
-}
-
-/** osu! column index (0-based) for a Quaver lane number (1-based). */
-export function quaverLaneToOsuColumn(lane: number): number {
-  return lane - 1;
-}

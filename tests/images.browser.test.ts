@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { canvasProcessor } from "./images";
+import { canvasProcessor } from "../src/lib/convert/images";
 
 /**
  * Pixel-level tests for the canvas pipeline, running in real Chromium.
