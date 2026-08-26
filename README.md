@@ -36,9 +36,13 @@ Requires Node 20+.
 
 ```
 npm install
-npm run dev     # http://localhost:5173
-npm test        # parser and detector tests
+npm run dev           # http://localhost:5173
+npm test              # fast Node suite
+npm run test:browser  # canvas pixel tests, real Chromium via Playwright
+npm run test:all      # both
 ```
+
+The first browser run needs `npx playwright install chromium`.
 
 ## Test skins
 
@@ -66,15 +70,23 @@ src/components/    drop zone, reports, preview canvas
 | 2 | Declarative element mapping table | Done, covered by tests |
 | 3 | Side-by-side playfield preview | Done, **not covered by tests** |
 | 4 | Geometry translation (x0.625 / x1.6) | Done, covered by tests |
-| 5 | Canvas pipeline | Wiring covered by tests; **pixel output unverified** |
+| 5 | Canvas pipeline | Done, covered by browser tests |
 | 6 | Synthesis and conversion report | Done, wiring covered by tests |
 
-### What is not verified
+### Scope
 
-`src/lib/convert/images.ts` only runs in a browser, so the test suite covers
-*which* operation is called with *what* arguments, never the pixels it
-produces. Converting a real skin in the browser is the only thing that
-exercises it.
+Playfield elements are converted. Everything else a skin contains — hitsounds,
+backgrounds, cursors, combo and score digits, health bar, grades — is **carried
+through at its original path and listed in the report**, not remapped. The
+destination game probably does not read those locations, but the assets survive
+for you to place by hand rather than vanishing without a word.
+
+Not yet mapped: combo/score digit fonts (Quaver `Numbers/` vs osu!'s `[Fonts]`
+prefixes), health bar, hit bubbles, judgement counter, `mania-warningarrow`,
+`comboburst-mania`, the scratch lane / `SpecialStyle` pairing, and `@2x`
+emission on the way out.
+
+### What is not verified
 
 Three behaviours could not be settled from either game's documentation:
 

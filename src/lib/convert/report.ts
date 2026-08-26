@@ -9,8 +9,10 @@
 import type { ElementCost, ElementGroup } from "./elements";
 
 export type EntryStatus =
-  /** Carried across unchanged. */
+  /** Carried across unchanged, as a mapped playfield element. */
   | "copied"
+  /** Copied through untouched because no mapping claims it. */
+  | "carried"
   /** Carried across, with a skin.ini value written to match. */
   | "configured"
   /** Pixels were processed — resized, letterboxed, packed or sliced. */
@@ -50,6 +52,7 @@ export interface ConversionReport {
 export function emptyCounts(): Record<EntryStatus, number> {
   return {
     copied: 0,
+    carried: 0,
     configured: 0,
     processed: 0,
     approximated: 0,
@@ -67,6 +70,7 @@ export function tally(entries: ReportEntry[]): Record<EntryStatus, number> {
 
 export const STATUS_LABEL: Record<EntryStatus, string> = {
   copied: "Copied",
+  carried: "Carried through",
   configured: "Copied + configured",
   processed: "Processed",
   approximated: "Approximated",

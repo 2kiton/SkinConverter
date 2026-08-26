@@ -14,6 +14,7 @@ interface Props {
 const ORDER: EntryStatus[] = [
   "copied",
   "configured",
+  "carried",
   "processed",
   "synthesized",
   "approximated",

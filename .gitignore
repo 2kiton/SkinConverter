@@ -231,3 +231,6 @@ obj/
 *.tmp
 # QuaverMania scratch
 /skins-test/
+
+# Vitest browser-mode failure screenshots
+src/**/__screenshots__/

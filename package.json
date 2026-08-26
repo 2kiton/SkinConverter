@@ -9,7 +9,9 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:browser": "vitest run --config vitest.browser.config.ts",
+    "test:all": "npm run test && npm run test:browser"
   },
   "dependencies": {
     "jszip": "^3.10.1",
@@ -21,6 +23,8 @@
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
     "@vitejs/plugin-react": "^4.3.4",
+    "@vitest/browser": "^3.2.7",
+    "playwright": "^1.56.1",
     "typescript": "~5.7.3",
     "vite": "^6.1.0",
     "vitest": "^3.0.5"

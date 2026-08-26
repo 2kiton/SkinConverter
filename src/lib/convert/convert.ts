@@ -75,6 +75,7 @@ async function quaverToOsuSkin(source: SkinPackage, options: ConvertOptions): Pr
   const entries: SkinEntry[] = [];
   const report: ReportEntry[] = [];
   const warnings: string[] = [];
+  const consumed = new Set<string>();
 
   const keymodes = quaverKeymodes(source);
   if (keymodes.length === 0) {
@@ -154,6 +155,7 @@ async function quaverToOsuSkin(source: SkinPackage, options: ConvertOptions): Pr
           to: "skin.ini Colour1…",
           detail: "Averaged the stage background under each lane into osu!'s per-lane Colour keys.",
         });
+        consumed.add(bgMask.path.toLowerCase());
       }
     }
 
@@ -188,6 +190,7 @@ async function quaverToOsuSkin(source: SkinPackage, options: ConvertOptions): Pr
           if (frames.length > 1) {
             frames.forEach((frame, i) => {
               entries.push({ path: `${stripExt(outName)}-${i}.png`, originalPath: found.entry.path, bytes: frame });
+              consumed.add(found.entry.path.toLowerCase());
             });
             status = "processed";
             detail = `Sliced a ${found.sheet.rows}x${found.sheet.cols} spritesheet into ${frames.length} frames.`;
@@ -240,6 +243,7 @@ async function quaverToOsuSkin(source: SkinPackage, options: ConvertOptions): Pr
         }
 
         entries.push({ path: outName, originalPath: found.entry.path, bytes });
+        consumed.add(found.entry.path.toLowerCase());
         writeImageKey(ini, mapping, lane, km, stripExt(outName));
         report.push(
           entry(mapping, mapping.cost === "geometry" ? "configured" : status, {
@@ -270,6 +274,8 @@ async function quaverToOsuSkin(source: SkinPackage, options: ConvertOptions): Pr
       "Long note tails were copied unflipped. osu! flips tails by default from skin v2.5 — if yours look wrong, re-run with the flip enabled.",
     );
   }
+
+  report.push(...carryRemainder(source, entries, consumed));
 
   const doc = ini.build();
   entries.push({ path: "skin.ini", originalPath: "skin.ini", bytes: encode(serializeIni(doc)) });
@@ -308,6 +314,7 @@ async function osuToQuaverSkin(
   const entries: SkinEntry[] = [];
   const report: ReportEntry[] = [];
   const warnings: string[] = [];
+  const consumed = new Set<string>();
 
   const blocks = osuManiaBlocks(source);
   if (blocks.length === 0) {
@@ -441,6 +448,7 @@ async function osuToQuaverSkin(
           const packed = await proc.packSheet(frames.map((f) => f.bytes));
           const sheetPath = outPath.replace(/\.png$/i, `@${packed.rows}x${packed.cols}.png`);
           entries.push({ path: sheetPath, originalPath: frames[0]!.path, bytes: packed.bytes });
+          for (const f of frames) consumed.add(f.path.toLowerCase());
           report.push(
             entry(mapping, "processed", {
               keymode: label,
@@ -474,6 +482,7 @@ async function osuToQuaverSkin(
         }
 
         entries.push({ path: outPath, originalPath: chosen.entry.path, bytes });
+        consumed.add(chosen.entry.path.toLowerCase());
         report.push(
           entry(mapping, status, {
             keymode: label,
@@ -493,6 +502,8 @@ async function osuToQuaverSkin(
       `The source uses NoteBodyStyle ${bodyStyle}, which repeats the hold body. Quaver always stretches hold bodies, so long notes will look different.`,
     );
   }
+
+  report.push(...carryRemainder(source, entries, consumed));
 
   const doc = ini.build();
   entries.push({ path: "skin.ini", originalPath: "skin.ini", bytes: encode(serializeIni(doc)) });
@@ -730,6 +741,61 @@ function rotationWarnings(keymodes: QuaverKeymode[]): string[] {
     }
   }
   return out;
+}
+
+/**
+ * Copy through every source file no mapping claimed.
+ *
+ * A skin is more than its playfield: hitsounds, backgrounds, cursors, combo
+ * digits and the health bar all live in files this converter has no mapping
+ * for. Emitting only mapped elements silently produced a skin with no sound
+ * and no HUD, so anything unclaimed is carried across at its original path
+ * and listed in the report.
+ *
+ * The path is NOT remapped — the destination game very likely does not read
+ * that location — but the asset survives for the user to place by hand, which
+ * beats deleting it without a word.
+ */
+function carryRemainder(
+  source: SkinPackage,
+  entries: SkinEntry[],
+  consumed: Set<string>,
+): ReportEntry[] {
+  const out: ReportEntry[] = [];
+  const taken = new Set(entries.map((e) => e.path.toLowerCase()));
+
+  for (const entry of source.entries) {
+    const key = entry.path.toLowerCase();
+    if (key === "skin.ini" || consumed.has(key)) continue;
+    // Never let a carried file shadow something the conversion produced.
+    if (taken.has(key)) continue;
+
+    entries.push({ path: entry.path, originalPath: entry.path, bytes: entry.bytes });
+    out.push({
+      elementId: "carried",
+      label: describeCarried(entry.path),
+      group: "stage",
+      cost: "none",
+      status: "carried",
+      from: entry.path,
+      to: entry.path,
+    });
+  }
+  return out;
+}
+
+function describeCarried(path: string): string {
+  const lower = path.toLowerCase();
+  if (/\.(wav|ogg|mp3)$/.test(lower)) return "Sound effect";
+  if (/(^|\/)backgrounds?\//.test(lower)) return "Background";
+  if (/(^|\/)numbers?\//.test(lower) || /(^|\/)(score|combo)-/.test(lower)) return "Number font";
+  if (/(^|\/)health\//.test(lower)) return "Health bar";
+  if (/(^|\/)grades?\//.test(lower)) return "Grade";
+  if (/cursor/.test(lower)) return "Cursor";
+  if (/(^|\/)(menu|mainmenu|pause|skip|scoreboard|hitbubbles|judgements?)\//.test(lower)) return "Interface";
+  if (/note-mine/.test(lower)) return "Mine (Quaver only)";
+  if (/(^|\/)lanecover\//.test(lower)) return "Lane cover (Quaver only)";
+  return "Unmapped file";
 }
 
 function range(from: number, to: number): number[] {

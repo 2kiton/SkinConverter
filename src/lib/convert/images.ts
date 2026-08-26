@@ -143,8 +143,12 @@ export function canvasProcessor(): ImageProcessor {
 
       const bitmap = await decode(bytes);
       const radians = (normalized * Math.PI) / 180;
-      const cos = Math.abs(Math.cos(radians));
-      const sin = Math.abs(Math.sin(radians));
+      // Math.cos(PI/2) is 6.1e-17, not 0, so a plain ceil() adds a stray
+      // transparent pixel on every right-angle turn — and right angles are
+      // the common case for arrow skins. Snap the near-zero and near-one
+      // values before measuring.
+      const cos = snap(Math.abs(Math.cos(radians)));
+      const sin = snap(Math.abs(Math.sin(radians)));
       const width = Math.ceil(bitmap.width * cos + bitmap.height * sin);
       const height = Math.ceil(bitmap.width * sin + bitmap.height * cos);
 
@@ -243,6 +247,13 @@ export function canvasProcessor(): ImageProcessor {
 
 type Surface = { canvas: OffscreenCanvas | HTMLCanvasElement; ctx: CanvasRenderingContext2D };
 
+/** Pull a floating-point trig result back onto an exact 0 or 1. */
+function snap(value: number): number {
+  if (Math.abs(value) < 1e-9) return 0;
+  if (Math.abs(value - 1) < 1e-9) return 1;
+  return value;
+}
+
 function surface(width: number, height: number): Surface {
   const w = Math.max(1, Math.round(width));
   const h = Math.max(1, Math.round(height));
@@ -269,14 +280,21 @@ async function decode(bytes: Uint8Array): Promise<ImageBitmap> {
 }
 
 async function encode(canvas: OffscreenCanvas | HTMLCanvasElement): Promise<Uint8Array> {
-  const blob =
-    canvas instanceof OffscreenCanvas
-      ? await canvas.convertToBlob({ type: "image/png" })
-      : await new Promise<Blob>((resolve, reject) =>
-          (canvas as HTMLCanvasElement).toBlob(
-            (b) => (b ? resolve(b) : reject(new Error("Canvas encoding failed"))),
-            "image/png",
-          ),
-        );
+  // Feature-detect rather than `instanceof OffscreenCanvas`: `surface()` falls
+  // back to an HTMLCanvasElement when OffscreenCanvas is missing, and naming
+  // the constructor here would throw a ReferenceError in exactly those
+  // browsers — crashing the fallback path that exists to serve them.
+  const blob = isOffscreen(canvas)
+    ? await canvas.convertToBlob({ type: "image/png" })
+    : await new Promise<Blob>((resolve, reject) =>
+        canvas.toBlob(
+          (b) => (b ? resolve(b) : reject(new Error("Canvas encoding failed"))),
+          "image/png",
+        ),
+      );
   return new Uint8Array(await blob.arrayBuffer());
+}
+
+function isOffscreen(canvas: OffscreenCanvas | HTMLCanvasElement): canvas is OffscreenCanvas {
+  return typeof (canvas as OffscreenCanvas).convertToBlob === "function";
 }
