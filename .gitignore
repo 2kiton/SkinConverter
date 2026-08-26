@@ -229,3 +229,5 @@ obj/
 
 # Temporary files
 *.tmp
+# QuaverMania scratch
+/skins-test/
