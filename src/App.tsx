@@ -1,10 +1,16 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import DropZone from "./components/DropZone";
 import PackageReport from "./components/PackageReport";
+import PlayfieldPreview from "./components/PlayfieldPreview";
+import ConversionSummary from "./components/ConversionSummary";
 import { readSkin } from "./lib/skin/read";
 import { writeSkin, downloadBlob } from "./lib/skin/write";
 import { checkRoundTrip, type RoundTripReport } from "./lib/skin/roundtrip";
-import { FORMAT_EXTENSION, type SkinPackage } from "./lib/skin/types";
+import { convertSkin } from "./lib/convert/convert";
+import { canvasProcessor } from "./lib/convert/images";
+import type { ConversionReport } from "./lib/convert/report";
+import { availableKeymodes } from "./lib/preview/layout";
+import { FORMAT_EXTENSION, FORMAT_LABEL, type SkinPackage } from "./lib/skin/types";
 
 type State =
   | { phase: "idle" }
@@ -12,12 +18,38 @@ type State =
   | { phase: "ready"; pkg: SkinPackage; report: RoundTripReport | null }
   | { phase: "error"; message: string };
 
+interface Converted {
+  pkg: SkinPackage;
+  report: ConversionReport;
+}
+
 export default function App() {
   const [state, setState] = useState<State>({ phase: "idle" });
   const [saving, setSaving] = useState(false);
+  const [converting, setConverting] = useState(false);
+  const [converted, setConverted] = useState<Converted | null>(null);
+  const [keymode, setKeymode] = useState("");
+
+  const source = state.phase === "ready" ? state.pkg : null;
+  const keymodes = useMemo(() => (source ? availableKeymodes(source) : []), [source]);
+
+  useEffect(() => {
+    if (keymodes.length > 0 && !keymodes.includes(keymode)) setKeymode(keymodes[0]!);
+  }, [keymodes, keymode]);
+
+  const convert = useCallback(async (pkg: SkinPackage) => {
+    setConverting(true);
+    try {
+      const result = await convertSkin(pkg, { processor: canvasProcessor() });
+      setConverted({ pkg: result.pkg, report: result.report });
+    } finally {
+      setConverting(false);
+    }
+  }, []);
 
   const load = useCallback(async (file: File) => {
     setState({ phase: "reading" });
+    setConverted(null);
     try {
       const pkg = await readSkin(file);
       setState({ phase: "ready", pkg, report: checkRoundTrip(pkg) });
@@ -55,10 +87,6 @@ export default function App() {
           Convert Quaver and osu!mania skins with the playfield intact. Everything runs in your browser — no upload, no
           account.
         </p>
-        <p className="stage">
-          Stage 1 · container round trip. This build reads a skin, verifies nothing is lost parsing its{" "}
-          <code>skin.ini</code>, and writes it back out. Element conversion comes next.
-        </p>
       </header>
 
       <DropZone onFile={load} busy={state.phase === "reading"} />
@@ -70,21 +98,82 @@ export default function App() {
         </div>
       )}
 
-      {state.phase === "ready" && (
+      {source && (
         <>
-          <PackageReport pkg={state.pkg} report={state.report} />
+          <PackageReport pkg={source} report={state.phase === "ready" ? state.report : null} />
+
           <div className="actions">
-            <button type="button" className="primary" onClick={() => save(state.pkg)} disabled={saving}>
-              {saving ? "Packing…" : `Re-export ${FORMAT_EXTENSION[state.pkg.format]}`}
+            <button
+              type="button"
+              className="primary"
+              onClick={() => convert(source)}
+              disabled={saving || converting}
+            >
+              {converting
+                ? "Converting…"
+                : `Convert to ${FORMAT_LABEL[source.format === "quaver" ? "osu" : "quaver"]}`}
             </button>
-            <button type="button" onClick={() => setState({ phase: "idle" })}>
+            <button type="button" onClick={() => save(source)} disabled={saving || converting}>
+              Re-export source
+            </button>
+            <button
+              type="button"
+              onClick={() => setState({ phase: "idle" })}
+              disabled={saving || converting}
+            >
               Load another
             </button>
           </div>
-          <p className="hint">
-            Re-export writes the skin back unchanged. Import it into{" "}
-            {state.pkg.format === "quaver" ? "Quaver" : "osu!"} and confirm it still loads — that is the stage 1 test.
-          </p>
+
+          {keymodes.length > 0 && (
+            <section className="panel">
+              <div className="panel-head">
+                <h3>Playfield</h3>
+                {keymodes.length > 1 && (
+                  <div className="keymodes" role="group" aria-label="Keymode">
+                    {keymodes.map((km) => (
+                      <button
+                        key={km}
+                        type="button"
+                        className={`chip${km === keymode ? " is-active" : ""}`}
+                        onClick={() => setKeymode(km)}
+                        aria-pressed={km === keymode}
+                      >
+                        {km}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="preview-pair">
+                <PlayfieldPreview pkg={source} keymode={keymode} />
+                {converted && <PlayfieldPreview pkg={converted.pkg} keymode={keymode} />}
+              </div>
+
+              <p className="hint">
+                Each side is drawn by its own game's rules. Receptors are the tell: osu! stretches the key image to the
+                column width and the band down to the stage bottom, ignoring aspect ratio, while Quaver scales to the
+                column width and keeps it.
+              </p>
+            </section>
+          )}
+
+          {converted && (
+            <>
+              <ConversionSummary report={converted.report} />
+              <div className="actions">
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={() => save(converted.pkg)}
+                  disabled={saving || converting}
+                >
+                  {saving ? "Packing…" : `Download ${FORMAT_EXTENSION[converted.pkg.format]}`}
+                </button>
+              </div>
+            </>
+          )}
         </>
       )}
     </main>
