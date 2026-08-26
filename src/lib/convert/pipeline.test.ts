@@ -50,6 +50,18 @@ class RecordingProcessor implements ImageProcessor {
     this.note("stretchToAspect", aspect);
     return b;
   }
+  async measure(_b: Uint8Array) {
+    this.note("measure");
+    return { width: 600, height: 40 };
+  }
+  async scaleBy(b: Uint8Array, factor: number): Promise<Uint8Array> {
+    this.note("scaleBy", factor);
+    return b;
+  }
+  async resizeToWidth(b: Uint8Array, width: number): Promise<Uint8Array> {
+    this.note("resizeToWidth", width);
+    return b;
+  }
   async laneStripes(lanes: LaneSlot[], width: number, height: number): Promise<Uint8Array> {
     this.note("laneStripes", lanes.length, width, height);
     return new Uint8Array([1, 2, 3, 4]);
@@ -91,16 +103,32 @@ function quaverIni(extra = ""): string {
   return ["[General]", "Name = T", "", "[4K]", "ColumnSize = 90", "NotePadding = 0", extra, ""].join("\r\n");
 }
 
-describe("receptor aspect handling", () => {
-  it("pads Quaver receptors to osu!'s key box before osu! stretches them", async () => {
+describe("receptor sizing", () => {
+  it("sizes Quaver receptors to the column width, not to the key band", async () => {
     const proc = new RecordingProcessor();
-    await convertSkin(pkg("quaver", quaverIni(), QUAVER_PATHS), { processor: proc });
+    const { pkg: out } = await convertSkin(pkg("quaver", quaverIni(), QUAVER_PATHS), { processor: proc });
 
-    const boxes = proc.opsNamed("letterbox");
-    // Two receptor states x four lanes.
-    expect(boxes).toHaveLength(8);
-    // ColumnSize 90 -> 56.25 osu!px wide; hit position 402 leaves 78 below it.
-    expect(boxes[0]!.args[0]).toBeCloseTo(56.25 / 78, 6);
+    // osu!'s LegacyKeyArea forces the sprite width to the column but leaves
+    // HEIGHT at the texture's own. Padding the texture taller — which an
+    // earlier build did — therefore stretched the key vertically on screen.
+    expect(proc.opsNamed("letterbox")).toHaveLength(0);
+
+    // Two states x four lanes, sized twice each: once standard, once @2x.
+    const sizes = proc.opsNamed("resizeToWidth");
+    expect(sizes).toHaveLength(16);
+    // ColumnSize 90 in Quaver's 768-space. osu! stores skin.ini's 480-space
+    // ColumnWidth times 1.6 internally, so the texture matches at 90, not the
+    // 56.25 that skin.ini itself carries.
+    expect(new Set(sizes.map((c) => c.args[0]))).toEqual(new Set([90, 180]));
+
+    // Both files ship, so the on-screen size is right whichever osu! picks.
+    expect(out.entries.some((e) => e.path === "qm-4k-receptor-up-1.png")).toBe(true);
+    expect(out.entries.some((e) => e.path === "qm-4k-receptor-up-1@2x.png")).toBe(true);
+  });
+
+  it("keeps skin.ini pointing at the stem, letting osu! pick the @2x file", async () => {
+    const { pkg: out } = await convertSkin(pkg("quaver", quaverIni(), QUAVER_PATHS));
+    expect(sectionOf(out, "Mania")["KeyImage0"]).toBe("qm-4k-receptor-up-1");
   });
 
   it("bakes osu!'s stretch into receptors on the way into Quaver", async () => {
@@ -117,12 +145,47 @@ describe("receptor aspect handling", () => {
     expect(stretches[0]!.args[0]).toBeCloseTo(30 / 78, 6);
   });
 
-  it("leaves notes alone — only receptors are reshaped", async () => {
+  it("leaves notes at their source size — osu! scales those uniformly", async () => {
     const proc = new RecordingProcessor();
-    await convertSkin(pkg("quaver", quaverIni(), QUAVER_PATHS), { processor: proc });
-    const { report } = await convertSkin(pkg("quaver", quaverIni(), QUAVER_PATHS), { processor: proc });
+    const { pkg: out, report } = await convertSkin(pkg("quaver", quaverIni(), QUAVER_PATHS), {
+      processor: proc,
+    });
+    // LegacyNotePiece divides by the texture width, so aspect is preserved
+    // whatever the texture measures. Resizing would only cost resolution.
     const notes = report.entries.filter((e) => e.elementId === "note");
     expect(notes.every((n) => n.status === "copied")).toBe(true);
+    expect(out.entries.some((e) => e.path === "qm-4k-note-1.png")).toBe(true);
+  });
+
+  it("shrinks natively-drawn elements out of Quaver's 768-high space", async () => {
+    const proc = new RecordingProcessor();
+    await convertSkin(
+      pkg("quaver", quaverIni(), [
+        ...QUAVER_PATHS,
+        "4k/Stage/stage-left-border.png",
+        "Judgements/judge-marv.png",
+      ]),
+      { processor: proc },
+    );
+    // Stage borders and judgement bursts are drawn at raw texture width, so
+    // they land 1.6x too large unless scaled by 0.625 — doubled for @2x.
+    const scales = proc.opsNamed("scaleBy");
+    expect(scales.length).toBeGreaterThan(0);
+    expect(new Set(scales.map((c) => c.args[0]))).toEqual(new Set([0.625, 1.25]));
+  });
+
+  it("centres the judgement burst like Quaver rather than osu!'s default", async () => {
+    const { pkg: out } = await convertSkin(pkg("quaver", quaverIni(), QUAVER_PATHS));
+    // osu! defaults ScorePosition to 300 of 480 (62% down); Quaver centres it.
+    expect(sectionOf(out, "Mania")["ScorePosition"]).toBe("240");
+  });
+
+  it("shifts the burst by JudgementBurstPosY", async () => {
+    const { pkg: out } = await convertSkin(
+      pkg("quaver", quaverIni("JudgementBurstPosY = 80"), QUAVER_PATHS),
+    );
+    // 80 Quaver units x 0.625 = 50 osu!px below centre.
+    expect(sectionOf(out, "Mania")["ScorePosition"]).toBe("290");
   });
 });
 

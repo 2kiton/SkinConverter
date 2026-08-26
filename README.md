@@ -81,10 +81,27 @@ through at its original path and listed in the report**, not remapped. The
 destination game probably does not read those locations, but the assets survive
 for you to place by hand rather than vanishing without a word.
 
-Not yet mapped: combo/score digit fonts (Quaver `Numbers/` vs osu!'s `[Fonts]`
-prefixes), health bar, hit bubbles, judgement counter, `mania-warningarrow`,
-`comboburst-mania`, the scratch lane / `SpecialStyle` pairing, and `@2x`
-emission on the way out.
+Not yet mapped: hit bubbles, judgement counter (Quaver's
+`Judgements/judgement-overlay*` has no osu! counterpart at all),
+`mania-warningarrow`, `comboburst-mania`, and the scratch lane /
+`SpecialStyle` pairing.
+
+### Sizing rules
+
+Quaver authors art in a 768-high space and osu! in a 480-high one, so anything
+osu! draws at native size lands 1.6x too large unless it is rescaled. osu!'s
+own source decides which rule applies per element:
+
+| Element | osu! behaviour | What the converter does |
+| --- | --- | --- |
+| Notes | `LegacyNotePiece` scales uniformly by `DrawWidth / texture width` | Nothing — aspect survives at any size |
+| Keys | `LegacyKeyArea` sets `RelativeSizeAxes.X, Width = 1`; height stays absolute | Resize so texture width equals the column width |
+| Stage borders | `Scale = (1, DrawHeight / Height)` — X scale is 1 | Scale by 0.625 |
+| Judgements, health bar | Drawn at native size | Scale by 0.625 |
+
+Everything rescaled ships as both `name.png` and `name@2x.png` at matched
+on-screen sizes, so the result does not depend on how a given osu! build
+resolves HD variants.
 
 ### What is not verified
 

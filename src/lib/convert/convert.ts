@@ -18,6 +18,8 @@ import { columnTokens, parseSpecialStyle, SpecialStyle } from "./lanes";
 import {
   QUAVER_DEFAULT_COLUMN_SIZE,
   QUAVER_EQUIVALENT_BODY_STYLE,
+  QUAVER_TO_OSU,
+  OSU_TO_QUAVER,
   alignmentToColumnStart,
   collapseColumnWidths,
   columnStartToAlignment,
@@ -38,6 +40,20 @@ import {
   OSU_SCREEN_HEIGHT,
 } from "./geometry";
 import { FileIndex, fallbackIndexFor, NO_FALLBACKS, type QuaverFallbacks } from "./files";
+import {
+  HEALTH_PIECES,
+  SUPPRESSED_OSU_PIECES,
+  VERTICAL_TO_HORIZONTAL_DEGREES,
+  isVertical,
+  transparentPixel,
+} from "./health";
+import {
+  FONT_FAMILIES,
+  exportPrefix,
+  glyphNames,
+  osuGlyphPath,
+  quaverGlyphPath,
+} from "./fonts";
 import { tally, type ConversionReport, type ReportEntry } from "./report";
 import type { ImageProcessor, LaneSlot } from "./images";
 import { passthroughProcessor } from "./images";
@@ -92,6 +108,103 @@ async function quaverToOsuSkin(source: SkinPackage, options: ConvertOptions): Pr
 
   ini.comment("Converted from a Quaver skin by QuaverMania.");
 
+  // Fonts are global to the skin, so they are resolved once, before the
+  // per-keymode blocks are written.
+  const fontKeys: [string, string][] = [];
+  for (const family of FONT_FAMILIES) {
+    let found = 0;
+    for (const glyph of glyphNames(family, "quaver")) {
+      const src = index.get(quaverGlyphPath(family, glyph));
+      if (!src) continue;
+      const osuGlyph = family.symbols.find(([q]) => q === glyph)?.[1] ?? glyph;
+      const outPath = osuGlyphPath(exportPrefix(family), osuGlyph);
+
+      // The score and combo counters live in osu!'s HUD, which stays in the
+      // 480-space skin.ini is written in — unlike the mania playfield, which
+      // scales by STABLE_MAGIC_SCALE_FACTOR into 768-space. Glyphs copied
+      // straight across therefore render 1.6x too large.
+      const glyphHd = await proc.scaleBy(src.bytes, QUAVER_TO_OSU * 2);
+      const glyphSd = await proc.scaleBy(src.bytes, QUAVER_TO_OSU);
+      entries.push({ path: outPath, originalPath: src.path, bytes: glyphSd });
+      entries.push({
+        path: outPath.replace(/\.png$/i, "@2x.png"),
+        originalPath: src.path,
+        bytes: glyphHd,
+      });
+      consumed.add(src.path.toLowerCase());
+      report.push({
+        elementId: `font-${family.id}`,
+        label: `${family.id === "combo" ? "Combo" : "Score"} font`,
+        group: "judgements",
+        cost: "identity",
+        status: "processed",
+        from: src.path,
+        to: outPath,
+        detail: "Scaled into osu!'s 480-space HUD, which does not use the playfield's 1.6x scaling.",
+      });
+      found++;
+    }
+    if (found > 0) fontKeys.push([family.osuPrefixKey, exportPrefix(family)]);
+  }
+
+  if (fontKeys.length > 0) {
+    ini.section("Fonts");
+    for (const [key, value] of fontKeys) ini.pair(key, value);
+  }
+
+  // Health bar, also global rather than per keymode.
+  let healthFound = false;
+  for (const piece of HEALTH_PIECES) {
+    const src = index.get(piece.quaver);
+    if (!src) continue;
+    healthFound = true;
+
+    let bytes = src.bytes;
+    let detail = "Scaled from Quaver's 768-high space into osu!'s 480-high one.";
+
+    // Quaver's bar may be vertical; osu!'s scorebar is horizontal only.
+    const size = await proc.measure(bytes);
+    if (size && isVertical(size.width, size.height)) {
+      bytes = await proc.rotate(bytes, VERTICAL_TO_HORIZONTAL_DEGREES);
+      detail = "Rotated a vertical Quaver bar to osu!'s horizontal scorebar, then rescaled.";
+    }
+
+    const hd = await proc.scaleBy(bytes, QUAVER_TO_OSU * 2);
+    bytes = await proc.scaleBy(bytes, QUAVER_TO_OSU);
+
+    entries.push({ path: piece.osu, originalPath: src.path, bytes });
+    entries.push({ path: piece.osu.replace(/\.png$/i, "@2x.png"), originalPath: src.path, bytes: hd });
+    consumed.add(src.path.toLowerCase());
+    report.push({
+      elementId: piece.id,
+      label: piece.label,
+      group: "stage",
+      cost: "image",
+      status: "processed",
+      from: src.path,
+      to: piece.osu,
+      detail,
+    });
+  }
+
+  if (healthFound) {
+    // osu! substitutes its own art for a missing element but honours an empty
+    // one, so blank the pieces Quaver has no counterpart for rather than let
+    // osu!'s stock marker land on a converted skin.
+    for (const path of SUPPRESSED_OSU_PIECES) {
+      entries.push({ path, originalPath: "", bytes: transparentPixel() });
+    }
+    report.push({
+      elementId: "healthExtras",
+      label: "Health bar marker",
+      group: "stage",
+      cost: "none",
+      status: "synthesized",
+      to: SUPPRESSED_OSU_PIECES.join(", "),
+      detail: "Blanked; osu! draws a marker and character that Quaver has no equivalent for.",
+    });
+  }
+
   // Sampled once and reused: the stage background is a single image for the
   // whole skin, not per keymode.
   const bgMask = source.entries.find((e) => /stage-bgmask\.png$/i.test(e.path));
@@ -119,12 +232,35 @@ async function quaverToOsuSkin(source: SkinPackage, options: ConvertOptions): Pr
       .pair("NoteBodyStyle", QUAVER_EQUIVALENT_BODY_STYLE);
 
     const hitOffset = parseNumber(km.config["HitPosOffsetY"]) ?? 0;
-    ini.pair("HitPosition", tidy(offsetToHitPosition(hitOffset)));
+
+    // Quaver centres the receptor ON the hit position. osu! anchors the key
+    // area to the bottom of the stage and puts the hit position at its top
+    // edge, so the two only line up if HitPosition is pulled down by half the
+    // receptor's height. Without this the judgement line sits above the
+    // receptors by however tall they are.
+    const receptorSize = await measureReceptor(index, proc, km);
+    const halfReceptorOsu = receptorSize
+      ? quaverToOsu((columnSize * (receptorSize.height / receptorSize.width)) / 2)
+      : 0;
+    const hitPosition = receptorSize
+      ? OSU_SCREEN_HEIGHT - halfReceptorOsu + quaverToOsu(hitOffset)
+      : offsetToHitPosition(hitOffset);
+    ini.pair("HitPosition", tidy(hitPosition));
+
+    // Quaver centres the judgement burst on the playfield's mid-point;
+    // osu!'s ScorePosition default of 300 sits at 62% down instead.
+    const burstOffset = parseNumber(km.config["JudgementBurstPosY"]) ?? 0;
+    ini.pair("ScorePosition", tidy(OSU_SCREEN_HEIGHT / 2 + quaverToOsu(burstOffset)));
 
     const lightOffset = parseNumber(km.config["ColumnLightingOffsetY"]);
     if (lightOffset !== null) {
       ini.pair("LightPosition", tidy(OSU_DEFAULT_LIGHT_POSITION + quaverToOsu(lightOffset)));
     }
+
+    // Quaver draws no separator between columns, but osu!'s ColourColumnLine
+    // defaults to opaque white — which is where the white lane dividers in a
+    // converted skin come from. Make them transparent.
+    ini.pair("ColourColumnLine", "0,0,0,0");
 
     // ColumnColor{n} is the press-lighting tint, which is exactly ColourLight{n}.
     for (let lane = 1; lane <= km.keys; lane++) {
@@ -135,6 +271,7 @@ async function quaverToOsuSkin(source: SkinPackage, options: ConvertOptions): Pr
     // Synthesis: Quaver paints one image behind the whole stage, osu! tints
     // each lane with Colour{n}. Averaging the mask under each lane recovers
     // the part of that image osu! is able to express.
+    let painted = false;
     if (bgMask) {
       const slots = laneSlots(km.keys, columnSize, notePadding);
       const sampled = await proc.sampleLaneColours(bgMask.bytes, slots, slotsWidth(slots));
@@ -156,7 +293,14 @@ async function quaverToOsuSkin(source: SkinPackage, options: ConvertOptions): Pr
           detail: "Averaged the stage background under each lane into osu!'s per-lane Colour keys.",
         });
         consumed.add(bgMask.path.toLowerCase());
+        painted = true;
       }
+    }
+
+    // Quaver's stage is a flat black field behind the notes. Say so
+    // explicitly rather than trusting osu!'s default to match.
+    if (!painted) {
+      for (let lane = 1; lane <= km.keys; lane++) ini.pair(`Colour${lane}`, "0,0,0,255");
     }
 
     for (const mapping of ELEMENTS) {
@@ -184,6 +328,12 @@ async function quaverToOsuSkin(source: SkinPackage, options: ConvertOptions): Pr
         let bytes = found.entry.bytes;
         let status: ReportEntry["status"] = "copied";
         let detail: string | undefined;
+        // Written alongside the standard file rather than instead of it. osu!
+        // prefers `name@2x` and halves its display size, but whether a given
+        // build resolves an HD-only element that way is not something the
+        // docs settle — shipping both makes the on-screen size identical
+        // either way, and costs a few KB.
+        let hdBytes: Uint8Array | null = null;
 
         if (found.sheet) {
           const frames = await proc.sliceSheet(bytes, found.sheet.rows, found.sheet.cols);
@@ -225,17 +375,42 @@ async function quaverToOsuSkin(source: SkinPackage, options: ConvertOptions): Pr
           detail = `Baked ${rotation}° of per-lane rotation into the image.`;
         }
 
-        // osu! stretches the key image to the column width AND the band from
-        // the hit position to the bottom of the stage, ignoring aspect ratio.
-        // Padding to that aspect first means the stretch lands on transparent
-        // space instead of distorting the art.
-        if (mapping.id === "receptorUp" || mapping.id === "receptorDown") {
-          const boxHeight = OSU_SCREEN_HEIGHT - offsetToHitPosition(hitOffset);
-          if (boxHeight > 0) {
-            bytes = await proc.letterbox(bytes, columnWidthOsu / boxHeight);
-            status = "processed";
-            detail = "Padded to osu!'s key box aspect so its stretch does not distort the art.";
-          }
+        // Sizing, per osu!'s own drawing rules:
+        //
+        //   Notes      LegacyNotePiece scales uniformly by DrawWidth/texture
+        //              width, so aspect is kept and texture size is irrelevant.
+        //   Receptors  LegacyKeyArea gives the sprite RelativeSizeAxes.X with
+        //              Width = 1, leaving height ABSOLUTE at the texture's own
+        //              height. Width is forced to the column, height is not —
+        //              so the texture has to be sized so its width equals the
+        //              column width, or the key renders vertically stretched.
+        //   Native     Stage borders scale (1, DrawHeight/Height): X scale is
+        //              1, so on-screen width is the raw texture width. Same for
+        //              judgements. Quaver art is drawn in a 768-high space and
+        //              osu! in a 480-high one, so it lands 1.6x too big unless
+        //              it is scaled by 0.625.
+        //
+        // Emitting at @2x doubles the pixels for the same on-screen size, so
+        // the downscale does not cost resolution.
+        if (mapping.osuSizing === "keyArea") {
+          // osu!'s playfield works in 768-space, not the 480-space skin.ini is
+          // written in: LegacyManiaSkinConfiguration stores the default column
+          // as `30 * STABLE_MAGIC_SCALE_FACTOR` = 48, so a ColumnWidth of 30
+          // becomes 48 internally. Texture pixels map to those internal units,
+          // which means the key texture has to be as wide as the column in
+          // 768-space — and that is exactly Quaver's own ColumnSize. Sizing to
+          // the 480-space number instead left the texture 1.6x too short, and
+          // since osu! forces the width but not the height, the key rendered
+          // that much too wide.
+          hdBytes = await proc.resizeToWidth(bytes, columnSize * 2);
+          bytes = await proc.resizeToWidth(bytes, columnSize);
+          status = "processed";
+          detail = `Sized to the ${tidy(columnSize)}-unit column; osu! forces key width but leaves height native.`;
+        } else if (mapping.osuSizing === "native") {
+          hdBytes = await proc.scaleBy(bytes, QUAVER_TO_OSU * 2);
+          bytes = await proc.scaleBy(bytes, QUAVER_TO_OSU);
+          status = "processed";
+          detail = "Scaled from Quaver's 768-high space into osu!'s 480-high one.";
         }
 
         if (found.viaFallback) {
@@ -243,6 +418,14 @@ async function quaverToOsuSkin(source: SkinPackage, options: ConvertOptions): Pr
         }
 
         entries.push({ path: outName, originalPath: found.entry.path, bytes });
+        if (hdBytes) {
+          entries.push({
+            path: `${stripExt(outName)}@2x.png`,
+            originalPath: found.entry.path,
+            bytes: hdBytes,
+          });
+        }
+        const emitted = outName;
         consumed.add(found.entry.path.toLowerCase());
         writeImageKey(ini, mapping, lane, km, stripExt(outName));
         report.push(
@@ -250,7 +433,7 @@ async function quaverToOsuSkin(source: SkinPackage, options: ConvertOptions): Pr
             keymode: km.label,
             ...(lane ? { lane } : {}),
             from: found.entry.path,
-            to: outName,
+            to: emitted,
             ...(detail ? { detail } : {}),
           }),
         );
@@ -330,6 +513,54 @@ async function osuToQuaverSkin(
     .pair("Author", general["Author"] ?? "")
     .pair("Version", "1.0");
   ini.comment("Converted from an osu!mania skin by QuaverMania.");
+
+  // Fonts are global, and osu! names them by prefix rather than by a fixed
+  // filename, so the prefix has to be read before the glyphs can be found.
+  // Both prefixes default to "score", which means one osu! font commonly
+  // feeds both of Quaver's separate combo and score fonts.
+  const fonts = source.ini ? findSection(source, "Fonts") : {};
+  for (const family of FONT_FAMILIES) {
+    const prefix = fonts[family.osuPrefixKey]?.trim() || family.osuDefaultPrefix;
+    for (const glyph of glyphNames(family, "osu")) {
+      const found = index.findOsu(osuGlyphPath(prefix, glyph));
+      if (!found) continue;
+      const quaverGlyph = family.symbols.find(([, o]) => o === glyph)?.[0] ?? glyph;
+      const outPath = quaverGlyphPath(family, quaverGlyph);
+      if (entries.some((e) => e.path.toLowerCase() === outPath.toLowerCase())) continue;
+
+      entries.push({ path: outPath, originalPath: found.entry.path, bytes: found.entry.bytes });
+      consumed.add(found.entry.path.toLowerCase());
+      report.push({
+        elementId: `font-${family.id}`,
+        label: `${family.id === "combo" ? "Combo" : "Score"} font`,
+        group: "judgements",
+        cost: "identity",
+        status: "copied",
+        from: found.entry.path,
+        to: outPath,
+      });
+    }
+  }
+
+  for (const piece of HEALTH_PIECES) {
+    const found = index.findOsu(piece.osu);
+    if (!found) continue;
+    // osu! authors in a 480-high space and Quaver draws at native size in a
+    // 768-high one, so the bar has to grow to keep the same screen presence.
+    const bytes = await proc.scaleBy(found.entry.bytes, OSU_TO_QUAVER);
+    entries.push({ path: piece.quaver, originalPath: found.entry.path, bytes });
+    consumed.add(found.entry.path.toLowerCase());
+    report.push({
+      elementId: piece.id,
+      label: piece.label,
+      group: "stage",
+      cost: "image",
+      status: "processed",
+      from: found.entry.path,
+      to: piece.quaver,
+      detail: "Scaled from osu!'s 480-high space into Quaver's 768-high one.",
+    });
+  }
 
   for (const block of blocks) {
     const keys = block.keys;
@@ -686,6 +917,24 @@ function entry(
     status,
     ...extra,
   };
+}
+
+/**
+ * Measure a keymode's first receptor, so the hit position can be aligned to
+ * its centre. Returns null when the skin ships none, or when the processor
+ * cannot decode images (the headless one used in tests).
+ */
+async function measureReceptor(
+  index: FileIndex,
+  proc: ImageProcessor,
+  km: QuaverKeymode,
+): Promise<{ width: number; height: number } | null> {
+  const entry =
+    index.get(`${km.folder}/Receptors/receptor-up-1.png`) ??
+    index.get("sharedk/Receptors/receptor-up-1.png");
+  if (!entry) return null;
+  const size = await proc.measure(entry.bytes);
+  return size && size.width > 0 ? size : null;
 }
 
 /** Evenly spaced lane slots for a keymode, starting at x = 0. */

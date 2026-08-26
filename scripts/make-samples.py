@@ -89,6 +89,14 @@ def build_quaver():
     files["4k/Stage/stage-hitposition-overlay.png"] = png(256, 6, solid(255, 255, 255, 200))
     files["4k/Stage/stage-left-border.png"] = png(8, 256, solid(90, 90, 110))
     files["4k/Stage/stage-right-border.png"] = png(8, 256, solid(90, 90, 110))
+    for d in range(10):
+        files[f"Numbers/combo-{d}.png"] = png(48, 64, bar(255, 255, 255))
+        files[f"Numbers/score-{d}.png"] = png(48, 64, bar(220, 220, 255))
+    files["Numbers/score-percent.png"] = png(48, 64, bar(200, 200, 255))
+    files["Numbers/score-decimal.png"] = png(24, 64, bar(200, 200, 255))
+    for j in ("marv", "perf", "great", "good", "okay", "miss"):
+        files[f"Judgements/judge-{j}.png"] = png(200, 80, bar(255, 220, 120))
+    files["SFX/hitsound.wav"] = b"RIFF____WAVEfmt "
     files["4k/Lighting/hitlighting@1x4.png"] = png(
         256, 64, lambda x, y, w, h: (255, 255, 200, 40 + (x // 64) * 60)
     )

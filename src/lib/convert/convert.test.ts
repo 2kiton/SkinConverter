@@ -92,7 +92,9 @@ describe("Quaver -> osu!", () => {
     const names = new Set(out.entries.map((e) => e.path));
     for (const lane of [1, 2, 3, 4]) {
       expect(names.has(`qm-4k-note-${lane}.png`)).toBe(true);
+      // Both sizes ship so the on-screen result is the same either way.
       expect(names.has(`qm-4k-receptor-up-${lane}.png`)).toBe(true);
+      expect(names.has(`qm-4k-receptor-up-${lane}@2x.png`)).toBe(true);
     }
   });
 

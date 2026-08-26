@@ -22,17 +22,19 @@ async function build(name: string, paths: string[], ini: string): Promise<SkinPa
 
 const QUAVER_INI = "[General]\r\nName = T\r\n\r\n[4K]\r\nColumnSize = 90\r\n";
 
+/** Files with no mapping at all — these must be carried through verbatim. */
 const EXTRAS = [
   "SFX/hitsound.wav",
   "SFX/combobreak.wav",
   "Backgrounds/bg.jpg",
-  "Numbers/combo-0.png",
-  "Numbers/score-0.png",
-  "Health/health-background.png",
   "Grades/grade-small-s.png",
   "cursor.png",
   "steam_workshop_preview.png",
 ];
+
+/** These DO have mappings, so they are converted rather than carried. */
+const FONTS = ["Numbers/combo-0.png", "Numbers/score-0.png"];
+const HEALTH = ["Health/health-background.png", "Health/health-foreground.png"];
 
 describe("non-playfield files", () => {
   it("carries every unmapped file through instead of dropping it", async () => {
@@ -43,6 +45,37 @@ describe("non-playfield files", () => {
     for (const path of EXTRAS) {
       expect(out.has(path.toLowerCase()), `${path} should survive the conversion`).toBe(true);
     }
+  });
+
+  it("converts the health bar onto osu!'s scorebar", async () => {
+    const src = await build("t.qs", [...HEALTH, ...EXTRAS], QUAVER_INI);
+    const { pkg, report } = await convertSkin(src);
+
+    const out = new Set(pkg.entries.map((e) => e.path.toLowerCase()));
+    expect(out.has("scorebar-bg.png")).toBe(true);
+    expect(out.has("scorebar-colour.png")).toBe(true);
+    expect(out.has("health/health-background.png")).toBe(false);
+
+    // osu! substitutes its own marker for a missing file, so it is blanked.
+    expect(out.has("scorebar-marker.png")).toBe(true);
+    expect(report.entries.some((e) => e.elementId === "healthExtras")).toBe(true);
+  });
+
+  it("converts number fonts rather than carrying them", async () => {
+    const src = await build("t.qs", [...FONTS, ...EXTRAS], QUAVER_INI);
+    const { pkg, report } = await convertSkin(src);
+
+    // Quaver's Numbers/ folder maps onto osu!'s [Fonts] prefixes, so these
+    // are remapped to a real osu! filename instead of left where they were.
+    const out = new Set(pkg.entries.map((e) => e.path.toLowerCase()));
+    expect(out.has("qm-combo-0.png")).toBe(true);
+    expect(out.has("qm-score-0.png")).toBe(true);
+    expect(out.has("numbers/combo-0.png")).toBe(false);
+
+    // Rescaled into osu!'s 480-space HUD, so they count as processed.
+    const fontRows = report.entries.filter((e) => e.elementId.startsWith("font-"));
+    expect(fontRows.length).toBeGreaterThan(0);
+    expect(fontRows.every((r) => r.status === "processed")).toBe(true);
   });
 
   it("lists them in the report rather than carrying them silently", async () => {
@@ -62,9 +95,8 @@ describe("non-playfield files", () => {
 
     expect(labelFor("SFX/hitsound.wav")).toBe("Sound effect");
     expect(labelFor("Backgrounds/bg.jpg")).toBe("Background");
-    expect(labelFor("Numbers/combo-0.png")).toBe("Number font");
-    expect(labelFor("Health/health-background.png")).toBe("Health bar");
     expect(labelFor("cursor.png")).toBe("Cursor");
+    expect(labelFor("Grades/grade-small-s.png")).toBe("Grade");
   });
 
   it("does not carry a file it already converted", async () => {
@@ -91,7 +123,9 @@ describe("non-playfield files", () => {
 
   it("works the same way converting osu! to Quaver", async () => {
     const osuIni = "[General]\r\nName: T\r\n\r\n[Mania]\r\nKeys: 4\r\nColumnWidth: 30,30,30,30\r\n";
-    const extras = ["normal-hitnormal.wav", "menu-background.jpg", "score-0.png"];
+    // score-0.png is deliberately absent: it is osu!'s default font prefix,
+    // so it converts into Quaver's Numbers/ folder rather than being carried.
+    const extras = ["normal-hitnormal.wav", "menu-background.jpg"];
     const src = await build("t.osk", ["mania-note1.png", "mania-note2.png", ...extras], osuIni);
     const { pkg, report } = await convertSkin(src);
 

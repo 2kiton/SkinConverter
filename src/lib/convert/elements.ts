@@ -41,6 +41,14 @@ export interface ElementMapping {
   osuIniKey?: string;
   /** Quaver spritesheet form, when the element animates as a sheet. */
   quaverSheet?: string;
+  /**
+   * How osu! sizes this element on screen, which decides what the exported
+   * texture has to measure:
+   *   uniform  scaled to the column, aspect kept — texture size is irrelevant
+   *   keyArea  width forced to the column, height left at the texture's own
+   *   native   drawn at raw texture width, so it needs the 0.625 space change
+   */
+  osuSizing?: "uniform" | "keyArea" | "native";
   note?: string;
 }
 
@@ -54,6 +62,7 @@ export const ELEMENTS: ElementMapping[] = [
     osu: "mania-note{token}.png",
     osuIniKey: "NoteImage{n}",
     perLane: true,
+    osuSizing: "uniform",
     cost: "identity",
   },
   {
@@ -64,6 +73,7 @@ export const ELEMENTS: ElementMapping[] = [
     osu: "mania-note{token}H.png",
     osuIniKey: "NoteImage{n}H",
     perLane: true,
+    osuSizing: "uniform",
     cost: "identity",
   },
   {
@@ -75,6 +85,7 @@ export const ELEMENTS: ElementMapping[] = [
     osu: "mania-note{token}L.png",
     osuIniKey: "NoteImage{n}L",
     perLane: true,
+    osuSizing: "uniform",
     cost: "geometry",
     note: "Quaver stretches the body, so NoteBodyStyle must be 0 (Stretch) on the osu! side.",
   },
@@ -86,6 +97,7 @@ export const ELEMENTS: ElementMapping[] = [
     osu: "mania-note{token}T.png",
     osuIniKey: "NoteImage{n}T",
     perLane: true,
+    osuSizing: "uniform",
     cost: "image",
     note: "osu! flips the tail by default from skin v2.5; Quaver draws it as authored.",
   },
@@ -99,6 +111,7 @@ export const ELEMENTS: ElementMapping[] = [
     osu: "mania-key{token}.png",
     osuIniKey: "KeyImage{n}",
     perLane: true,
+    osuSizing: "keyArea",
     cost: "image",
     note: "osu! stretches keys to the column box, ignoring aspect ratio; Quaver preserves it.",
   },
@@ -110,6 +123,7 @@ export const ELEMENTS: ElementMapping[] = [
     osu: "mania-key{token}D.png",
     osuIniKey: "KeyImage{n}D",
     perLane: true,
+    osuSizing: "keyArea",
     cost: "image",
   },
 
@@ -122,6 +136,7 @@ export const ELEMENTS: ElementMapping[] = [
     osu: "mania-stage-left.png",
     osuIniKey: "StageLeft",
     perLane: false,
+    osuSizing: "native",
     cost: "identity",
   },
   {
@@ -132,6 +147,7 @@ export const ELEMENTS: ElementMapping[] = [
     osu: "mania-stage-right.png",
     osuIniKey: "StageRight",
     perLane: false,
+    osuSizing: "native",
     cost: "identity",
   },
   {
@@ -142,6 +158,7 @@ export const ELEMENTS: ElementMapping[] = [
     osu: "mania-stage-hint.png",
     osuIniKey: "StageHint",
     perLane: false,
+    osuSizing: "native",
     cost: "geometry",
   },
   {
@@ -231,6 +248,7 @@ function judgement(quaverName: string, osuName: string): ElementMapping[] {
       osuIniKey: `Hit${osuName === "300g" ? "300g" : osuName}`,
       perLane: false,
       cost: "image",
+      osuSizing: "native",
     },
   ];
 }

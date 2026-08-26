@@ -46,6 +46,12 @@ export interface ImageProcessor {
    * actually looked.
    */
   stretchToAspect(bytes: Uint8Array, aspect: number): Promise<Uint8Array>;
+  /** Pixel dimensions, or null when the bytes cannot be decoded. */
+  measure(bytes: Uint8Array): Promise<{ width: number; height: number } | null>;
+  /** Scale by a uniform factor, preserving aspect. */
+  scaleBy(bytes: Uint8Array, factor: number): Promise<Uint8Array>;
+  /** Resize so the image is exactly `width` pixels across, preserving aspect. */
+  resizeToWidth(bytes: Uint8Array, width: number): Promise<Uint8Array>;
   /** Draw flat per-lane colour bands — a Quaver stage background from osu! lane colours. */
   laneStripes(lanes: LaneSlot[], width: number, height: number): Promise<Uint8Array>;
   /** Average the colour under each lane slot — the inverse of `laneStripes`. */
@@ -74,6 +80,15 @@ export const passthroughProcessor: ImageProcessor = {
     return bytes;
   },
   async stretchToAspect(bytes) {
+    return bytes;
+  },
+  async measure() {
+    return null;
+  },
+  async scaleBy(bytes) {
+    return bytes;
+  },
+  async resizeToWidth(bytes) {
     return bytes;
   },
   async laneStripes() {
@@ -195,6 +210,34 @@ export function canvasProcessor(): ImageProcessor {
       return encode(canvas);
     },
 
+    async measure(bytes) {
+      try {
+        const bitmap = await decode(bytes);
+        const size = { width: bitmap.width, height: bitmap.height };
+        bitmap.close?.();
+        return size;
+      } catch {
+        // A corrupt or unsupported image should not abort the conversion.
+        return null;
+      }
+    },
+
+    async scaleBy(bytes, factor) {
+      if (!Number.isFinite(factor) || factor <= 0 || Math.abs(factor - 1) < 0.001) return bytes;
+      const bitmap = await decode(bytes);
+      return redraw(bitmap, Math.max(1, Math.round(bitmap.width * factor)));
+    },
+
+    async resizeToWidth(bytes, width) {
+      if (!Number.isFinite(width) || width <= 0) return bytes;
+      const bitmap = await decode(bytes);
+      if (Math.abs(bitmap.width - width) < 1) {
+        bitmap.close?.();
+        return bytes;
+      }
+      return redraw(bitmap, Math.max(1, Math.round(width)));
+    },
+
     async laneStripes(lanes, width, height) {
       const { canvas, ctx } = surface(width, height);
       for (const lane of lanes) {
@@ -246,6 +289,16 @@ export function canvasProcessor(): ImageProcessor {
 // ---------------------------------------------------------------- plumbing
 
 type Surface = { canvas: OffscreenCanvas | HTMLCanvasElement; ctx: CanvasRenderingContext2D };
+
+/** Redraw a bitmap at a new width, keeping its aspect ratio. */
+async function redraw(bitmap: ImageBitmap, width: number): Promise<Uint8Array> {
+  const height = Math.max(1, Math.round((bitmap.height / bitmap.width) * width));
+  const { canvas, ctx } = surface(width, height);
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close?.();
+  return encode(canvas);
+}
 
 /** Pull a floating-point trig result back onto an exact 0 or 1. */
 function snap(value: number): number {

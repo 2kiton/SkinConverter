@@ -69,24 +69,17 @@ describe("sample .qs", () => {
     const { report } = await convertSkin(await load("sample-quaver.qs"));
     const missing = [...new Set(report.entries.filter((e) => e.status === "missing").map((e) => e.elementId))];
 
-    // The sample deliberately omits lighting and judgements, so this is the
+    // The sample deliberately omits column and hold lighting, so this is the
     // exact expected set — asserting it by name catches a resolver regression
     // that a bare `missing === 0` check would hide behind a changed fixture.
-    expect(missing.sort()).toEqual(
-      [
-        "columnLight",
-        "holdLighting",
-        "judge-good",
-        "judge-great",
-        "judge-marv",
-        "judge-miss",
-        "judge-okay",
-        "judge-perf",
-      ].sort(),
-    );
+    expect(missing.sort()).toEqual(["columnLight", "holdLighting"].sort());
 
     // Everything the sample does ship must resolve, notes and receptors included.
-    const shipped = ["note", "holdHead", "holdBody", "holdTail", "receptorUp", "receptorDown", "stageHint"];
+    const shipped = [
+      "note", "holdHead", "holdBody", "holdTail",
+      "receptorUp", "receptorDown", "stageHint",
+      "judge-marv", "judge-miss",
+    ];
     for (const id of shipped) {
       const rows = report.entries.filter((e) => e.elementId === id);
       expect(rows.length).toBeGreaterThan(0);
