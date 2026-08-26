@@ -35,10 +35,11 @@ import {
   OSU_DEFAULT_COLUMN_START,
   OSU_DEFAULT_HIT_POSITION,
   OSU_DEFAULT_LIGHT_POSITION,
+  OSU_SCREEN_HEIGHT,
 } from "./geometry";
 import { FileIndex, fallbackIndexFor, NO_FALLBACKS, type QuaverFallbacks } from "./files";
 import { tally, type ConversionReport, type ReportEntry } from "./report";
-import type { ImageProcessor } from "./images";
+import type { ImageProcessor, LaneSlot } from "./images";
 import { passthroughProcessor } from "./images";
 
 export interface ConvertOptions {
@@ -88,8 +89,11 @@ async function quaverToOsuSkin(source: SkinPackage, options: ConvertOptions): Pr
     .pair("Author", general["Author"] ?? "")
     .pair("Version", "2.5");
 
-  ini.section("Colours");
   ini.comment("Converted from a Quaver skin by QuaverMania.");
+
+  // Sampled once and reused: the stage background is a single image for the
+  // whole skin, not per keymode.
+  const bgMask = source.entries.find((e) => /stage-bgmask\.png$/i.test(e.path));
 
   for (const km of keymodes) {
     ini.section("Mania").pair("Keys", km.keys);
@@ -125,6 +129,32 @@ async function quaverToOsuSkin(source: SkinPackage, options: ConvertOptions): Pr
     for (let lane = 1; lane <= km.keys; lane++) {
       const colour = parseRgba(km.config[`ColumnColor${lane}`]);
       if (colour) ini.pair(`ColourLight${lane}`, formatRgba(colour, false));
+    }
+
+    // Synthesis: Quaver paints one image behind the whole stage, osu! tints
+    // each lane with Colour{n}. Averaging the mask under each lane recovers
+    // the part of that image osu! is able to express.
+    if (bgMask) {
+      const slots = laneSlots(km.keys, columnSize, notePadding);
+      const sampled = await proc.sampleLaneColours(bgMask.bytes, slots, slotsWidth(slots));
+      const usable = sampled.filter((c) => c !== null && c.a > 8);
+
+      if (usable.length > 0) {
+        sampled.forEach((colour, i) => {
+          if (colour && colour.a > 8) ini.pair(`Colour${i + 1}`, formatRgba(colour, true));
+        });
+        report.push({
+          elementId: "stageBgMask",
+          label: "Lane background colours",
+          group: "stage",
+          cost: "lossy",
+          status: "synthesized",
+          keymode: km.label,
+          from: bgMask.path,
+          to: "skin.ini Colour1…",
+          detail: "Averaged the stage background under each lane into osu!'s per-lane Colour keys.",
+        });
+      }
     }
 
     for (const mapping of ELEMENTS) {
@@ -182,6 +212,29 @@ async function quaverToOsuSkin(source: SkinPackage, options: ConvertOptions): Pr
           detail = "Flipped vertically to match osu!'s default tail orientation.";
         }
 
+        // Quaver rotates arrow skins per lane at runtime; osu! has no rotation
+        // key, so the rotation has to be baked into each lane's pixels or
+        // every arrow points the same way.
+        const rotation = rotationFor(mapping.id, km, lane);
+        if (rotation !== 0) {
+          bytes = await proc.rotate(bytes, rotation);
+          status = "processed";
+          detail = `Baked ${rotation}° of per-lane rotation into the image.`;
+        }
+
+        // osu! stretches the key image to the column width AND the band from
+        // the hit position to the bottom of the stage, ignoring aspect ratio.
+        // Padding to that aspect first means the stretch lands on transparent
+        // space instead of distorting the art.
+        if (mapping.id === "receptorUp" || mapping.id === "receptorDown") {
+          const boxHeight = OSU_SCREEN_HEIGHT - offsetToHitPosition(hitOffset);
+          if (boxHeight > 0) {
+            bytes = await proc.letterbox(bytes, columnWidthOsu / boxHeight);
+            status = "processed";
+            detail = "Padded to osu!'s key box aspect so its stretch does not distort the art.";
+          }
+        }
+
         if (found.viaFallback) {
           detail = `Resolved through the sharedk fallback (${found.entry.path}).`;
         }
@@ -201,13 +254,15 @@ async function quaverToOsuSkin(source: SkinPackage, options: ConvertOptions): Pr
     }
   }
 
+  warnings.push(...rotationWarnings(keymodes));
+
   if (source.entries.some((e) => /note-mine/i.test(e.path))) {
     warnings.push("Mines are Quaver-only and were not carried across; osu!mania has no equivalent.");
   }
-  const bgMask = source.entries.find((e) => /stage-bgmask\.png$/i.test(e.path));
-  if (bgMask) {
+
+  if (bgMask && !report.some((e) => e.status === "synthesized")) {
     warnings.push(
-      "The stage background image has no osu! counterpart. osu! tints lanes with Colour{n} instead — set those by hand.",
+      "The stage background image could not be sampled into per-lane colours; osu! will use its default lane backgrounds.",
     );
   }
   if (!options.flipHoldTail) {
@@ -307,13 +362,42 @@ async function osuToQuaverSkin(
       if (colour) ini.pair(`ColumnColor${column + 1}`, formatRgba(colour, true));
     }
 
-    const laneColours = range(1, keys)
-      .map((n) => parseRgba(block.config[`Colour${n}`]))
-      .filter((c): c is NonNullable<typeof c> => c !== null);
-    if (laneColours.length > 0) {
-      warnings.push(
-        `${label}: osu! lane background colours (Colour1…) have no Quaver key. Quaver uses one stage-bgmask image instead, so they were not carried across.`,
+    // Synthesis: osu! tints each lane with Colour{n}; Quaver has no such key,
+    // but it does draw one image behind the stage. Painting the lane colours
+    // into that image is the only way they survive.
+    const laneColours = range(1, keys).map((n) => parseRgba(block.config[`Colour${n}`]));
+    if (laneColours.some((c) => c !== null)) {
+      const quaverWidths = (widths.length > 0 ? widths : Array.from({ length: keys }, () => collapsed.value)).map(
+        osuToQuaver,
       );
+      const slots = laneColours.map((colour, i) => ({
+        x: quaverWidths.slice(0, i).reduce((n, w) => n + w, 0) + i * osuToQuaver(spacings[0] ?? 0),
+        width: quaverWidths[i] ?? osuToQuaver(collapsed.value),
+        colour,
+      }));
+      const total = slotsWidth(slots);
+      const mask = await proc.laneStripes(slots, Math.round(total), 512);
+
+      if (mask.length > 0) {
+        const maskPath = `${folder}/Stage/stage-bgmask.png`;
+        entries.push({ path: maskPath, originalPath: "skin.ini", bytes: mask });
+        ini.pair("BgMaskAlpha", "1.0");
+        report.push({
+          elementId: "stageBgMask",
+          label: "Lane background colours",
+          group: "stage",
+          cost: "lossy",
+          status: "synthesized",
+          keymode: label,
+          from: "skin.ini Colour1…",
+          to: maskPath,
+          detail: "Painted osu!'s per-lane colours into a Quaver stage background image.",
+        });
+      } else {
+        warnings.push(
+          `${label}: osu! lane background colours (Colour1…) have no Quaver key and could not be rendered into a stage background.`,
+        );
+      }
     }
 
     const style = parseSpecialStyle(block.config["SpecialStyle"]);
@@ -370,14 +454,33 @@ async function osuToQuaverSkin(
         }
 
         const chosen = still ?? { entry: frames[0]!, hd: false };
-        entries.push({ path: outPath, originalPath: chosen.entry.path, bytes: chosen.entry.bytes });
+        let bytes = chosen.entry.bytes;
+        let status: ReportEntry["status"] = mapping.cost === "geometry" ? "configured" : "copied";
+        let detail = chosen.hd
+          ? "Used the @2x source; Quaver has no HD suffix and scales natively."
+          : undefined;
+
+        // The mirror of the outbound case: osu! stretched this key image to
+        // its column box, and Quaver will not. Baking the stretch in is what
+        // makes the receptor look the same in Quaver as it did in osu!.
+        if (mapping.id === "receptorUp" || mapping.id === "receptorDown") {
+          const boxHeight = OSU_SCREEN_HEIGHT - hitPosition;
+          const boxWidth = widths[column] ?? collapsed.value;
+          if (boxHeight > 0 && boxWidth > 0) {
+            bytes = await proc.stretchToAspect(bytes, boxWidth / boxHeight);
+            status = "processed";
+            detail = "Baked in osu!'s key-box stretch, which Quaver does not apply.";
+          }
+        }
+
+        entries.push({ path: outPath, originalPath: chosen.entry.path, bytes });
         report.push(
-          entry(mapping, mapping.cost === "geometry" ? "configured" : "copied", {
+          entry(mapping, status, {
             keymode: label,
             ...(lane ? { lane } : {}),
             from: chosen.entry.path,
             to: outPath,
-            ...(chosen.hd ? { detail: "Used the @2x source; Quaver has no HD suffix and scales natively." } : {}),
+            ...(detail ? { detail } : {}),
           }),
         );
       }
@@ -572,6 +675,61 @@ function entry(
     status,
     ...extra,
   };
+}
+
+/** Evenly spaced lane slots for a keymode, starting at x = 0. */
+function laneSlots(keys: number, width: number, spacing: number): LaneSlot[] {
+  return Array.from({ length: keys }, (_, i) => ({
+    x: i * (width + spacing),
+    width,
+    colour: null,
+  }));
+}
+
+function slotsWidth(slots: LaneSlot[]): number {
+  const last = slots[slots.length - 1];
+  return last ? last.x + last.width : 0;
+}
+
+/**
+ * Per-lane rotation Quaver applies at runtime, in degrees.
+ *
+ * Only an explicit `HitObjectRotations` / `ReceptorRotations` list is honoured.
+ * `RotateHitObjectsByColumn` on its own makes Quaver use built-in per-keymode
+ * defaults that are not documented anywhere, and guessing them would rotate
+ * every arrow in the skin the wrong way — so that case is warned about
+ * instead, in `rotationWarnings`.
+ */
+function rotationFor(elementId: string, km: QuaverKeymode, lane: number | undefined): number {
+  if (lane === undefined) return 0;
+
+  const key =
+    elementId === "receptorUp" || elementId === "receptorDown"
+      ? "ReceptorRotations"
+      : elementId === "note" || elementId === "holdHead" || elementId === "holdTail"
+        ? "HitObjectRotations"
+        : null;
+  if (key === null) return 0;
+
+  const list = parseNumberList(km.config[key]);
+  return list[lane - 1] ?? 0;
+}
+
+function rotationWarnings(keymodes: QuaverKeymode[]): string[] {
+  const out: string[] = [];
+  for (const km of keymodes) {
+    const rotatesNotes = /^true$/i.test(km.config["RotateHitObjectsByColumn"] ?? "");
+    const rotatesReceptors = /^true$/i.test(km.config["RotateReceptorsByColumn"] ?? "");
+    const hasNoteList = parseNumberList(km.config["HitObjectRotations"]).length > 0;
+    const hasReceptorList = parseNumberList(km.config["ReceptorRotations"]).length > 0;
+
+    if ((rotatesNotes && !hasNoteList) || (rotatesReceptors && !hasReceptorList)) {
+      out.push(
+        `${km.label}: the skin rotates elements by column but gives no explicit rotation list. Quaver's built-in defaults are undocumented, so nothing was rotated — arrow skins will need HitObjectRotations set by hand.`,
+      );
+    }
+  }
+  return out;
 }
 
 function range(from: number, to: number): number[] {

@@ -371,3 +371,26 @@ td.mono {
 .b-synthesized { background: color-mix(in srgb, var(--q) 16%, transparent); color: var(--q); }
 .b-approximated { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
 .b-dropped, .b-missing { background: color-mix(in srgb, var(--bad) 16%, transparent); color: var(--bad); }
+
+.toggle {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 14px 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 14.5px;
+  font-weight: 600;
+}
+
+.toggle input { margin-top: 3px; accent-color: var(--q); flex: none; }
+.toggle > span { display: flex; flex-direction: column; gap: 3px; }
+
+.toggle-hint {
+  font-weight: 400;
+  font-size: 13.5px;
+  color: var(--ink-3);
+  max-width: 62ch;
+}

@@ -17,6 +17,13 @@ export interface PackedSheet {
   cols: number;
 }
 
+/** One lane's slot in the stage, in any consistent unit. */
+export interface LaneSlot {
+  x: number;
+  width: number;
+  colour: { r: number; g: number; b: number; a: number } | null;
+}
+
 export interface ImageProcessor {
   /** Cut a Quaver spritesheet into frames, left-to-right then top-to-bottom. */
   sliceSheet(bytes: Uint8Array, rows: number, cols: number): Promise<Uint8Array[]>;
@@ -28,10 +35,25 @@ export interface ImageProcessor {
   rotate(bytes: Uint8Array, degrees: number): Promise<Uint8Array>;
   /**
    * Fit an image into a box of the given aspect ratio without distorting it,
-   * padding with transparency. Used for receptors, because osu! stretches key
-   * images to the column box while Quaver preserves aspect ratio.
+   * padding with transparency. Used when the destination will stretch the
+   * result: pre-padding means the stretch lands on empty space, not on art.
    */
   letterbox(bytes: Uint8Array, aspect: number): Promise<Uint8Array>;
+  /**
+   * Resize to an aspect ratio, distorting deliberately. The mirror of
+   * `letterbox`: used when the SOURCE game stretched an image and the
+   * destination will not, so the stretch has to be baked in to preserve how it
+   * actually looked.
+   */
+  stretchToAspect(bytes: Uint8Array, aspect: number): Promise<Uint8Array>;
+  /** Draw flat per-lane colour bands — a Quaver stage background from osu! lane colours. */
+  laneStripes(lanes: LaneSlot[], width: number, height: number): Promise<Uint8Array>;
+  /** Average the colour under each lane slot — the inverse of `laneStripes`. */
+  sampleLaneColours(
+    bytes: Uint8Array,
+    lanes: LaneSlot[],
+    totalWidth: number,
+  ): Promise<({ r: number; g: number; b: number; a: number } | null)[]>;
 }
 
 /** Does nothing but hand the bytes back. Used in tests and on the server. */
@@ -50,6 +72,15 @@ export const passthroughProcessor: ImageProcessor = {
   },
   async letterbox(bytes) {
     return bytes;
+  },
+  async stretchToAspect(bytes) {
+    return bytes;
+  },
+  async laneStripes() {
+    return new Uint8Array();
+  },
+  async sampleLaneColours(_bytes, lanes) {
+    return lanes.map(() => null);
   },
 };
 
@@ -141,6 +172,69 @@ export function canvasProcessor(): ImageProcessor {
       ctx.drawImage(bitmap, (width - bitmap.width) / 2, (height - bitmap.height) / 2);
       bitmap.close?.();
       return encode(canvas);
+    },
+
+    async stretchToAspect(bytes, aspect) {
+      if (!Number.isFinite(aspect) || aspect <= 0) return bytes;
+      const bitmap = await decode(bytes);
+      if (Math.abs(bitmap.width / bitmap.height - aspect) < 0.001) {
+        bitmap.close?.();
+        return bytes;
+      }
+
+      // Keep the longer edge so nothing is downsampled away.
+      const width = bitmap.width;
+      const height = Math.max(1, Math.round(width / aspect));
+      const { canvas, ctx } = surface(width, height);
+      ctx.drawImage(bitmap, 0, 0, width, height);
+      bitmap.close?.();
+      return encode(canvas);
+    },
+
+    async laneStripes(lanes, width, height) {
+      const { canvas, ctx } = surface(width, height);
+      for (const lane of lanes) {
+        if (!lane.colour) continue;
+        const { r, g, b, a } = lane.colour;
+        ctx.fillStyle = `rgba(${r},${g},${b},${a / 255})`;
+        ctx.fillRect(Math.round(lane.x), 0, Math.round(lane.width), height);
+      }
+      return encode(canvas);
+    },
+
+    async sampleLaneColours(bytes, lanes, totalWidth) {
+      const bitmap = await decode(bytes);
+      const { ctx } = surface(bitmap.width, bitmap.height);
+      ctx.drawImage(bitmap, 0, 0);
+      const scale = bitmap.width / Math.max(1, totalWidth);
+
+      const out = lanes.map((lane) => {
+        const x = Math.round(lane.x * scale);
+        const w = Math.max(1, Math.round(lane.width * scale));
+        if (x < 0 || x >= bitmap.width) return null;
+
+        const data = ctx.getImageData(x, 0, Math.min(w, bitmap.width - x), bitmap.height).data;
+        let r = 0;
+        let g = 0;
+        let b = 0;
+        let a = 0;
+        const pixels = data.length / 4;
+        for (let i = 0; i < data.length; i += 4) {
+          r += data[i] ?? 0;
+          g += data[i + 1] ?? 0;
+          b += data[i + 2] ?? 0;
+          a += data[i + 3] ?? 0;
+        }
+        return {
+          r: Math.round(r / pixels),
+          g: Math.round(g / pixels),
+          b: Math.round(b / pixels),
+          a: Math.round(a / pixels),
+        };
+      });
+
+      bitmap.close?.();
+      return out;
     },
   };
 }

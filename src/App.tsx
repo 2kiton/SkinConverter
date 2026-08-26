@@ -29,6 +29,7 @@ export default function App() {
   const [converting, setConverting] = useState(false);
   const [converted, setConverted] = useState<Converted | null>(null);
   const [keymode, setKeymode] = useState("");
+  const [flipHoldTail, setFlipHoldTail] = useState(false);
 
   const source = state.phase === "ready" ? state.pkg : null;
   const keymodes = useMemo(() => (source ? availableKeymodes(source) : []), [source]);
@@ -37,15 +38,18 @@ export default function App() {
     if (keymodes.length > 0 && !keymodes.includes(keymode)) setKeymode(keymodes[0]!);
   }, [keymodes, keymode]);
 
-  const convert = useCallback(async (pkg: SkinPackage) => {
-    setConverting(true);
-    try {
-      const result = await convertSkin(pkg, { processor: canvasProcessor() });
-      setConverted({ pkg: result.pkg, report: result.report });
-    } finally {
-      setConverting(false);
-    }
-  }, []);
+  const convert = useCallback(
+    async (pkg: SkinPackage, flip: boolean) => {
+      setConverting(true);
+      try {
+        const result = await convertSkin(pkg, { processor: canvasProcessor(), flipHoldTail: flip });
+        setConverted({ pkg: result.pkg, report: result.report });
+      } finally {
+        setConverting(false);
+      }
+    },
+    [],
+  );
 
   const load = useCallback(async (file: File) => {
     setState({ phase: "reading" });
@@ -106,7 +110,7 @@ export default function App() {
             <button
               type="button"
               className="primary"
-              onClick={() => convert(source)}
+              onClick={() => convert(source, flipHoldTail)}
               disabled={saving || converting}
             >
               {converting
@@ -124,6 +128,22 @@ export default function App() {
               Load another
             </button>
           </div>
+
+          <label className="toggle">
+            <input
+              type="checkbox"
+              checked={flipHoldTail}
+              onChange={(e) => setFlipHoldTail(e.target.checked)}
+              disabled={converting}
+            />
+            <span>
+              Flip long note tails
+              <span className="toggle-hint">
+                osu! flips tails by default from skin v2.5; Quaver draws them as authored. The docs do not settle which
+                is right in practice — convert both ways and look at the one that reads correctly in game.
+              </span>
+            </span>
+          </label>
 
           {keymodes.length > 0 && (
             <section className="panel">
