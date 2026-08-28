@@ -88,6 +88,93 @@ Not yet mapped: hit bubbles, judgement counter (Quaver's
 `mania-warningarrow`, `comboburst-mania`, and the scratch lane /
 `SpecialStyle` pairing.
 
+## osu!lazer vs osu!stable
+
+The two clients read the same `skin.ini` differently, and a build that looks
+perfect on lazer can be badly wrong on stable. The converter therefore has a
+target switch; the exported **images are identical** between the two, only the
+config and a couple of image transforms differ.
+
+None of the following is in the osu! wiki, and
+`peppy/osu-stable-reference` — which lazer's own source cites for this
+behaviour — is no longer public. It was all established by testing against the
+real client, so treat it as observed behaviour rather than specification.
+
+### `ColumnStart` is ignored by lazer and honoured by stable
+
+lazer's `LegacyManiaSkinConfiguration` keeps the field under a region marked
+`Unimplemented properties, at this time present primarily for encode-decode
+stability` and centres the stage itself. stable uses it as the literal left
+edge of the stage.
+
+So a wrong `ColumnStart` is **invisible on lazer** and moves the whole stage on
+stable — which is exactly how it went unnoticed here.
+
+### Horizontal positions are measured in a 16:9 space, not 640 wide
+
+The wiki says positioning is "based on a height of 480 pixels". The height is
+what is pinned; the width follows the display's aspect. On 16:9 that is 853
+units across, so the centre is at **427, not 320**.
+
+Centring against 640 puts the stage 107 units left of centre. A known-good
+stable skin confirms the real figure: `ColumnStart: 300` with
+`ColumnWidth: 70,70,70,70` centres the stage at 440.
+
+This bakes an aspect ratio into the file. 16:9 is assumed; other ratios will
+sit slightly off-centre. Skins written by hand have the same limitation.
+
+### `[Mania]` keys are typed individually
+
+stable's parser is per-key, and the position family is `int32`:
+
+```
+Error in [Mania] Line 20: Expected type int32 (name = HitPosition)
+```
+
+A rejected line is **discarded silently in-game** — the hit line falls back to
+stable's default while the receptors stay where the skin put them, so the
+hitbox stops matching the art. `HitPosition`, `ScorePosition` and
+`LightPosition` are rounded for stable.
+
+The width keys are *not* int32. A working stable skin ships
+`ColumnWidth: 66.66,66.66,...`, so rounding those would lose accuracy for no
+reason.
+
+### Lines are hidden by width on stable, by colour on lazer
+
+lazer honours a transparent `ColourColumnLine`. stable needs the widths
+zeroed. Stable builds emit both, plus the barline equivalents:
+
+```ini
+ColumnLineWidth: 0,0,0,0,0    ; one more value than there are columns
+BarlineHeight: 0
+ColourBarline: 0,0,0,0
+JudgementLine: 0
+```
+
+### stable flips the long note tail; lazer does not
+
+osu! flips `mania-note{n}T` from skin version 2.5, which the converter
+declares. A Quaver end points away from the receptors, so shipping it as
+authored lands it upside down and buried in the body. Stable builds pre-flip
+it to cancel that out.
+
+### stable seats the tail below the end of the body
+
+The body is drawn to the note's end time, but the tail is seated slightly
+lower, leaving a strip of body uncovered above it. It reads as a thin bright
+line floating over every long note, and no `skin.ini` key moves the tail.
+
+The strip measures about one body-image height. Stable builds pad the tail
+above (after the flip, so it is always the exported image's top edge) by that
+height re-expressed in the tail's pixel scale — the two images are scaled
+independently to the column width — plus a small seating bias.
+
+Things this is *not*, all of which were ruled out in testing: `NoteBodyStyle`
+(all four values behave the same), barlines, the tail art, the body art, or
+anything about the config — substituting a known-good skin's entire `[Mania]`
+block changes nothing.
+
 ### Sizing rules
 
 Quaver authors art in a 768-high space and osu! in a 480-high one, so anything
