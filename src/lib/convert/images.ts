@@ -48,6 +48,14 @@ export interface ImageProcessor {
   stretchToAspect(bytes: Uint8Array, aspect: number): Promise<Uint8Array>;
   /** Pixel dimensions, or null when the bytes cannot be decoded. */
   measure(bytes: Uint8Array): Promise<{ width: number; height: number } | null>;
+  /**
+   * Grow the canvas upward by `pixels`, leaving the new space transparent and
+   * the original content anchored at the bottom.
+   *
+   * Used to shift an element a game seats in the wrong place: a taller sprite
+   * drawn from the same anchor moves its visible content.
+   */
+  padTop(bytes: Uint8Array, pixels: number): Promise<Uint8Array>;
   /** Scale by a uniform factor, preserving aspect. */
   scaleBy(bytes: Uint8Array, factor: number): Promise<Uint8Array>;
   /** Resize so the image is exactly `width` pixels across, preserving aspect. */
@@ -84,6 +92,9 @@ export const passthroughProcessor: ImageProcessor = {
   },
   async measure() {
     return null;
+  },
+  async padTop(bytes) {
+    return bytes;
   },
   async scaleBy(bytes) {
     return bytes;
@@ -220,6 +231,18 @@ export function canvasProcessor(): ImageProcessor {
         // A corrupt or unsupported image should not abort the conversion.
         return null;
       }
+    },
+
+    async padTop(bytes, pixels) {
+      const extra = Math.round(pixels);
+      if (!Number.isFinite(extra) || extra <= 0) return bytes;
+
+      const bitmap = await decode(bytes);
+      const { canvas, ctx } = surface(bitmap.width, bitmap.height + extra);
+      // Original content sits at the bottom; the new space is above it.
+      ctx.drawImage(bitmap, 0, extra);
+      bitmap.close?.();
+      return encode(canvas);
     },
 
     async scaleBy(bytes, factor) {

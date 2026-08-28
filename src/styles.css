@@ -396,3 +396,12 @@ td.mono {
 }
 
 .b-carried { background: var(--surface-2); color: var(--ink-3); }
+
+.target-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-weight: 600;
+}

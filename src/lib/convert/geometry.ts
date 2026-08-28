@@ -31,6 +31,20 @@ export const OSU_DEFAULT_COLUMN_START = 136;
 export const OSU_SCREEN_HEIGHT = 480;
 /** The osu! authoring box width, in osu!pixels. */
 export const OSU_SCREEN_WIDTH = 640;
+/**
+ * Horizontal extent osu! actually draws into on a 16:9 display.
+ *
+ * The wiki puts it as "commands that ask where to position something
+ * horizontally are based on a height of 480 pixels" — the height is fixed, so
+ * the width follows the monitor's aspect. 640 is only correct on 4:3; on 16:9
+ * there are 853 units across and the centre is at 427, not 320.
+ *
+ * osu!lazer never reads `ColumnStart` (its own config marks the field
+ * unimplemented) and centres the stage itself, so a wrong value is invisible
+ * there. osu!stable uses it as the literal left edge, which is where a stage
+ * centred against 640 ends up 107 units too far left.
+ */
+export const OSU_WIDESCREEN_WIDTH = (480 * 16) / 9;
 
 /** Quaver's own default column size, in its 1366x768 space. */
 export const QUAVER_DEFAULT_COLUMN_SIZE = 90;

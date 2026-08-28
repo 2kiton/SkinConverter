@@ -54,6 +54,10 @@ class RecordingProcessor implements ImageProcessor {
     this.note("measure");
     return { width: 600, height: 40 };
   }
+  async padTop(b: Uint8Array, pixels: number): Promise<Uint8Array> {
+    this.note("padTop", pixels);
+    return b;
+  }
   async scaleBy(b: Uint8Array, factor: number): Promise<Uint8Array> {
     this.note("scaleBy", factor);
     return b;

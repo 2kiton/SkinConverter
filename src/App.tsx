@@ -6,7 +6,7 @@ import ConversionSummary from "./components/ConversionSummary";
 import { readSkin } from "./lib/skin/read";
 import { writeSkin, downloadBlob } from "./lib/skin/write";
 import { checkRoundTrip, type RoundTripReport } from "./lib/skin/roundtrip";
-import { convertSkin } from "./lib/convert/convert";
+import { convertSkin, type OsuTarget } from "./lib/convert/convert";
 import { canvasProcessor } from "./lib/convert/images";
 import type { ConversionReport } from "./lib/convert/report";
 import { availableKeymodes } from "./lib/preview/layout";
@@ -30,6 +30,7 @@ export default function App() {
   const [converted, setConverted] = useState<Converted | null>(null);
   const [keymode, setKeymode] = useState("");
   const [flipHoldTail, setFlipHoldTail] = useState(false);
+  const [osuTarget, setOsuTarget] = useState<OsuTarget>("lazer");
 
   const source = state.phase === "ready" ? state.pkg : null;
   const keymodes = useMemo(() => (source ? availableKeymodes(source) : []), [source]);
@@ -39,10 +40,14 @@ export default function App() {
   }, [keymodes, keymode]);
 
   const convert = useCallback(
-    async (pkg: SkinPackage, flip: boolean) => {
+    async (pkg: SkinPackage, flip: boolean, target: OsuTarget) => {
       setConverting(true);
       try {
-        const result = await convertSkin(pkg, { processor: canvasProcessor(), flipHoldTail: flip });
+        const result = await convertSkin(pkg, {
+          processor: canvasProcessor(),
+          flipHoldTail: flip,
+          target,
+        });
         setConverted({ pkg: result.pkg, report: result.report });
       } finally {
         setConverting(false);
@@ -110,7 +115,7 @@ export default function App() {
             <button
               type="button"
               className="primary"
-              onClick={() => convert(source, flipHoldTail)}
+              onClick={() => convert(source, flipHoldTail, osuTarget)}
               disabled={saving || converting}
             >
               {converting
@@ -129,6 +134,34 @@ export default function App() {
             </button>
           </div>
 
+          {source.format === "quaver" && (
+            <div className="toggle">
+              <div className="target-head">
+                <span>Build for</span>
+                <div className="keymodes" role="group" aria-label="osu! client">
+                  {(["lazer", "stable"] as OsuTarget[]).map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      className={`chip${t === osuTarget ? " is-active" : ""}`}
+                      onClick={() => setOsuTarget(t)}
+                      aria-pressed={t === osuTarget}
+                      disabled={converting}
+                    >
+                      osu!{t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <span className="toggle-hint">
+                osu!stable&rsquo;s <code>[Mania]</code> parser only accepts whole numbers, so a value like{" "}
+                <code>ColumnWidth: 56.25</code> is rejected and the stage falls back to its defaults &mdash; which is
+                why a lazer build lands in the wrong place on stable. The stable build rounds that geometry. Every
+                image file is identical between the two.
+              </span>
+            </div>
+          )}
+
           <label className="toggle">
             <input
               type="checkbox"
@@ -139,8 +172,8 @@ export default function App() {
             <span>
               Flip long note tails
               <span className="toggle-hint">
-                osu! flips tails by default from skin v2.5; Quaver draws them as authored. The docs do not settle which
-                is right in practice — convert both ways and look at the one that reads correctly in game.
+                osu! flips tails by default from skin v2.5, so a Quaver end ships upside down and buries itself in the
+                body. Stable builds already pre-flip to cancel that out; tick this only if a lazer build needs the same.
               </span>
             </span>
           </label>

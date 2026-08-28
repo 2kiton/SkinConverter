@@ -38,6 +38,7 @@ import {
   OSU_DEFAULT_HIT_POSITION,
   OSU_DEFAULT_LIGHT_POSITION,
   OSU_SCREEN_HEIGHT,
+  OSU_WIDESCREEN_WIDTH,
 } from "./geometry";
 import { FileIndex, fallbackIndexFor, NO_FALLBACKS, type QuaverFallbacks } from "./files";
 import {
@@ -64,8 +65,21 @@ import { tally, type ConversionReport, type ReportEntry } from "./report";
 import type { ImageProcessor, LaneSlot } from "./images";
 import { passthroughProcessor } from "./images";
 
+/**
+ * Which osu! client the output is aimed at.
+ *
+ * lazer parses `[Mania]` geometry as floating point. osu!stable's parser is
+ * integer-based for these keys, so a value like `ColumnWidth: 56.25` does not
+ * survive it — the stage falls back to defaults and lands in the wrong place
+ * at the wrong size. Rounding is the only difference between the two targets;
+ * every file the converter writes is identical.
+ */
+export type OsuTarget = "lazer" | "stable";
+
 export interface ConvertOptions {
   processor?: ImageProcessor;
+  /** Defaults to `lazer`, which is the historical behaviour. */
+  target?: OsuTarget;
   /**
    * Flip the long-note tail when converting.
    *
@@ -98,6 +112,26 @@ async function quaverToOsuSkin(source: SkinPackage, options: ConvertOptions): Pr
   const report: ReportEntry[] = [];
   const warnings: string[] = [];
   const consumed = new Set<string>();
+
+  const target = options.target ?? "lazer";
+
+  // osu! flips `mania-note{n}T` itself from skin version 2.5, which we
+  // declare. A Quaver long note end points away from the receptors, so
+  // shipping it as-authored lands it upside down, buried in the body, with
+  // only its flat edge showing above — the thin line. Pre-flipping cancels
+  // osu!'s flip out. lazer does not apply that flip, so it stays opt-in there.
+  const flipTail = target === "stable" || (options.flipHoldTail ?? false);
+
+  // osu!stable types its [Mania] keys individually. The position family is
+  // int32 and a decimal makes stable reject the line outright:
+  //
+  //   Error in [Mania] Line 20: Expected type int32 (name = HitPosition)
+  //
+  // A rejected HitPosition means the hit line falls back to stable's default
+  // while the receptors stay where the skin put them, so the hitbox no longer
+  // lines up with the art. Width keys are NOT int32 — real stable skins ship
+  // `ColumnWidth: 66.66` — so rounding is applied only where it is required.
+  const pos = (value: number) => (target === "stable" ? Math.round(value) : value);
 
   const keymodes = quaverKeymodes(source);
   if (keymodes.length === 0) {
@@ -266,6 +300,11 @@ async function quaverToOsuSkin(source: SkinPackage, options: ConvertOptions): Pr
 
     const columnSize = parseNumber(km.config["ColumnSize"]) ?? QUAVER_DEFAULT_COLUMN_SIZE;
     const notePadding = parseNumber(km.config["NotePadding"]) ?? 0;
+
+    // Widths and gaps are rounded first, not just on the way out, so the
+    // stage width and starting edge are derived from the same numbers the
+    // client will actually read. Rounding only at print time would leave the
+    // stage a few pixels off-centre.
     const columnWidthOsu = quaverToOsu(columnSize);
     const spacingOsu = quaverToOsu(notePadding);
     const totalWidth = stageWidth(
@@ -278,10 +317,42 @@ async function quaverToOsuSkin(source: SkinPackage, options: ConvertOptions): Pr
       alignment === null ? OSU_DEFAULT_COLUMN_START : alignmentToColumnStart(alignment, totalWidth);
 
     ini
-      .pair("ColumnStart", tidy(columnStart))
       .pair("ColumnWidth", repeat(tidy(columnWidthOsu), km.keys))
       .pair("ColumnSpacing", repeat(tidy(spacingOsu), Math.max(0, km.keys - 1)))
       .pair("NoteBodyStyle", QUAVER_EQUIVALENT_BODY_STYLE);
+
+    // lazer ignores ColumnStart and centres the stage itself; stable takes it
+    // literally, in a space that is 853 units wide on 16:9 rather than 640.
+    // Centring against 640 therefore looks perfect on lazer and sits 107
+    // units left of centre on stable.
+    ini.pair(
+      "ColumnStart",
+      tidy(target === "stable" ? (OSU_WIDESCREEN_WIDTH - totalWidth) / 2 : columnStart),
+    );
+
+    if (target === "stable") {
+      // Zeroing the widths is how working stable skins hide the column
+      // separators and barlines; stable does not honour a transparent
+      // ColourColumnLine the way lazer does. ColumnLineWidth takes one more
+      // value than there are columns, for the edges.
+      ini
+        .pair("ColumnLineWidth", repeat("0", km.keys + 1))
+        .pair("BarlineHeight", 0)
+        // Barlines are the measure separators osu! draws across the stage,
+        // and ColourBarline defaults to opaque white. Quaver draws no such
+        // line. A zero BarlineHeight is not enough on its own — a working
+        // stable skin hides them with a fully transparent colour, which is
+        // what this matches.
+        //
+        // They read as "a line at the end of every long note" because long
+        // notes almost always end on a beat boundary, which is precisely
+        // where a barline falls.
+        .pair("ColourBarline", "0,0,0,0")
+        .pair("JudgementLine", 0);
+    }
+
+    // Absent means Quaver's default of True; only an explicit False counts.
+    const drawsLongNoteEnd = /^false$/i.test(km.config["DrawLongNoteEnd"] ?? "") ? false : true;
 
     const hitOffset = parseNumber(km.config["HitPosOffsetY"]) ?? 0;
 
@@ -297,16 +368,16 @@ async function quaverToOsuSkin(source: SkinPackage, options: ConvertOptions): Pr
     const hitPosition = receptorSize
       ? OSU_SCREEN_HEIGHT - halfReceptorOsu + quaverToOsu(hitOffset)
       : offsetToHitPosition(hitOffset);
-    ini.pair("HitPosition", tidy(hitPosition));
+    ini.pair("HitPosition", tidy(pos(hitPosition)));
 
     // Quaver centres the judgement burst on the playfield's mid-point;
     // osu!'s ScorePosition default of 300 sits at 62% down instead.
     const burstOffset = parseNumber(km.config["JudgementBurstPosY"]) ?? 0;
-    ini.pair("ScorePosition", tidy(OSU_SCREEN_HEIGHT / 2 + quaverToOsu(burstOffset)));
+    ini.pair("ScorePosition", tidy(pos(OSU_SCREEN_HEIGHT / 2 + quaverToOsu(burstOffset))));
 
     const lightOffset = parseNumber(km.config["ColumnLightingOffsetY"]);
     if (lightOffset !== null) {
-      ini.pair("LightPosition", tidy(OSU_DEFAULT_LIGHT_POSITION + quaverToOsu(lightOffset)));
+      ini.pair("LightPosition", tidy(pos(OSU_DEFAULT_LIGHT_POSITION + quaverToOsu(lightOffset))));
     }
 
     // Quaver draws no separator between columns, but osu!'s ColourColumnLine
@@ -411,10 +482,51 @@ async function quaverToOsuSkin(source: SkinPackage, options: ConvertOptions): Pr
           bytes = frames[0] ?? bytes;
         }
 
-        if (mapping.id === "holdTail" && options.flipHoldTail) {
-          bytes = await proc.flipVertical(bytes);
-          status = "processed";
-          detail = "Flipped vertically to match osu!'s default tail orientation.";
+        // Quaver's DrawLongNoteEnd, when False, means the game never renders
+        // the long note end at all — so the file in the skin may be a
+        // leftover or a placeholder that was never meant to be seen. osu! has
+        // no such switch and will happily draw it, which is where a stray bar
+        // at the top of every long note comes from. Blank it instead: osu!
+        // substitutes its own default for a MISSING element but honours an
+        // empty one.
+        if (mapping.id === "holdTail" && drawsLongNoteEnd === false) {
+          // Same dimensions, no pixels. osu! sizes the hold body relative to
+          // the tail, so collapsing it to a single pixel would shorten the
+          // body and expose osu!'s own art behind it. A real transparent image
+          // is written rather than the reference dropped, because osu!
+          // substitutes its own default art for a MISSING element.
+          const size = await proc.measure(bytes);
+          bytes = size ? await proc.laneStripes([], size.width, size.height) : transparentPixel();
+          status = "approximated";
+          detail =
+            "Blanked: the source skin sets DrawLongNoteEnd = False, so Quaver never draws this and osu! has no equivalent switch.";
+        } else if (mapping.id === "holdTail") {
+          if (flipTail) {
+            bytes = await proc.flipVertical(bytes);
+            status = "processed";
+            detail =
+              target === "stable"
+                ? "Pre-flipped: osu!stable flips the tail itself at skin version 2.5, which would otherwise turn the end upside down into the body."
+                : "Flipped vertically to match osu!'s default tail orientation.";
+          }
+
+          // osu!stable seats the tail slightly below where it ends the body,
+          // leaving a strip of body uncovered above it — the thin line over
+          // every long note. No skin.ini key moves the tail, but a taller
+          // sprite drawn from the same anchor puts its content higher, so the
+          // gap is closed by padding above it. Padding goes on last, after any
+          // flip, so it is always the top edge of the exported image no matter
+          // which way round the art ended up.
+          //
+          // The lift is the body's own height, which is what the exposed strip
+          // measures in game, converted into the tail's pixel scale since the
+          // two images are scaled independently to the column width.
+          const lift = target === "stable" ? await tailLift(index, proc, km, lane, bytes) : 0;
+          if (lift > 0) {
+            bytes = await proc.padTop(bytes, lift);
+            status = "processed";
+            detail = `Lifted ${lift}px; osu!stable seats the tail below the end of the body and leaves a strip of it showing.`;
+          }
         }
 
         // Quaver rotates arrow skins per lane at runtime; osu! has no rotation
@@ -469,6 +581,10 @@ async function quaverToOsuSkin(source: SkinPackage, options: ConvertOptions): Pr
           detail = `Resolved through the sharedk fallback (${found.entry.path}).`;
         }
 
+        // `geometry` elements report as "configured" only when nothing else
+        // happened to them; actual pixel work outranks the default.
+        const reported = status !== "copied" ? status : mapping.cost === "geometry" ? "configured" : status;
+
         entries.push({ path: outName, originalPath: found.entry.path, bytes });
         if (hdBytes) {
           entries.push({
@@ -481,7 +597,7 @@ async function quaverToOsuSkin(source: SkinPackage, options: ConvertOptions): Pr
         consumed.add(found.entry.path.toLowerCase());
         writeImageKey(ini, mapping, lane, km, stripExt(outName));
         report.push(
-          entry(mapping, mapping.cost === "geometry" ? "configured" : status, {
+          entry(mapping, reported, {
             keymode: km.label,
             ...(lane ? { lane } : {}),
             from: found.entry.path,
@@ -490,6 +606,20 @@ async function quaverToOsuSkin(source: SkinPackage, options: ConvertOptions): Pr
           }),
         );
       }
+    }
+  }
+
+  if (target === "stable") {
+    warnings.push(
+      "Built for osu!stable: HitPosition, ScorePosition and LightPosition are rounded because stable types them as int32 and rejects the whole line otherwise; ColumnStart centres the stage in the 16:9 space stable actually draws into; separators are hidden with ColumnLineWidth, and barlines with a transparent ColourBarline. lazer accepts decimals and ignores ColumnStart entirely, which is why a lazer build looks right there and not on stable.",
+    );
+  }
+
+  for (const km of keymodes) {
+    if (/^false$/i.test(km.config["DrawLongNoteEnd"] ?? "")) {
+      warnings.push(
+        `${km.label}: the source sets DrawLongNoteEnd = False, which Quaver honours by drawing no long note end. osu! has no such switch, so the end was blanked rather than left to show art the source never displays.`,
+      );
     }
   }
 
@@ -1017,6 +1147,51 @@ async function measureReceptor(
   if (!entry) return null;
   const size = await proc.measure(entry.bytes);
   return size && size.width > 0 ? size : null;
+}
+
+/**
+ * A small extra lift on top of the body-height term, as a fraction of the
+ * tail's width.
+ *
+ * The exposed strip measures about one body height, but covering exactly that
+ * still left a couple of pixels showing in game — stable seats the tail a
+ * little low on top of the overhang. Expressed against the tail's width rather
+ * than as a pixel count so it holds at any source resolution.
+ *
+ * Tuned in game. If it needs adjusting, err high: overshooting leaves a
+ * one-pixel transparent gap that shows the (usually dark) lane, while
+ * undershooting leaves a strip of the body, which is bright and is the exact
+ * artefact this exists to remove.
+ */
+const TAIL_SEATING_BIAS = 0.018;
+
+/**
+ * How far the long note tail has to rise to cover the body strip stable
+ * leaves exposed above it, in the tail image's own pixels.
+ *
+ * Returns 0 for lazer, which seats the tail correctly, and whenever either
+ * image cannot be measured.
+ */
+async function tailLift(
+  index: FileIndex,
+  proc: ImageProcessor,
+  km: QuaverKeymode,
+  lane: number | undefined,
+  tailBytes: Uint8Array,
+): Promise<number> {
+  const bodyEntry =
+    index.get(`${km.folder}/HitObjects/note-holdbody-${lane ?? 1}.png`) ??
+    index.get(`sharedk/HitObjects/note-holdbody-${lane ?? 1}.png`);
+  if (!bodyEntry) return 0;
+
+  const body = await proc.measure(bodyEntry.bytes);
+  const tail = await proc.measure(tailBytes);
+  if (!body || !tail || body.width <= 0) return 0;
+
+  // Both are scaled independently to the column width, so the body's height
+  // has to be re-expressed in the tail's pixels before it means anything.
+  const overhang = body.height * (tail.width / body.width);
+  return Math.round(overhang + tail.width * TAIL_SEATING_BIAS);
 }
 
 /** Evenly spaced lane slots for a keymode, starting at x = 0. */
